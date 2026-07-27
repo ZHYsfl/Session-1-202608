@@ -1,0 +1,80 @@
+window:
+  width: 960
+  height: 640
+  fps: 60
+
+robot:
+  radius: 18.0
+  max_speed: 120.0
+  max_angular_speed: 2.5
+  acceleration: 100.0
+
+sensors:
+  # 12 路 360° 等间隔测距传感器，角度相对机器人朝向。
+  angles_deg: [-150, -120, -90, -60, -30, 0, 30, 60, 90, 120, 150, 180]
+  max_range: 180.0
+
+prediction:
+  horizon_sec: 1.0
+  simulation_step_sec: 0.05
+  # 降低阈值以减少漏报；论文中应比较不同阈值的 Precision/Recall。
+  warning_threshold: 0.35
+
+navigation:
+  # 自动模式依次跟随安全途经点，不在运行时求解复杂路径规划。
+  waypoint_radius: 18.0
+  cruise_speed_ratio: 0.52
+  sharp_turn_speed_ratio: 0.12
+
+terrain:
+  randomize: true
+  # null 表示每次运行使用新的随机序列；填写整数可复现实验地形。
+  seed: null
+  # 三道纵向隔墙，每道墙只保留一个门洞，门洞位置上下交错。
+  barrier_count: 3
+  gap_size: [175.0, 210.0]
+  barrier_thickness: [30.0, 44.0]
+  x_jitter: 28.0
+  layout_attempts: 80
+  grid_size: 20.0
+  extra_clearance: 30.0
+  minimum_path_ratio: 1.20
+  minimum_route_points: 5
+
+episode:
+  # 起点格式为 [x, y, heading_deg]，终点格式为 [x, y]。
+  start: [75.0, 75.0, 0.0]
+  goal: [880.0, 570.0]
+  goal_radius: 28.0
+  max_duration_sec: 60.0
+  # randomize 为 false 时使用的固定途经点。
+  waypoints:
+    - [350.0, 40.0]
+    - [620.0, 40.0]
+    - [900.0, 40.0]
+    - [930.0, 300.0]
+    - [930.0, 570.0]
+
+training:
+  samples: 12000
+  epochs: 30
+  batch_size: 256
+  learning_rate: 0.001
+  hidden_dims: [64, 32]
+  seed: 42
+  random_obstacle_count: 8
+
+paths:
+  checkpoint: outputs/collision_mlp.pt
+  metrics: outputs/training_metrics.json
+  evaluation: outputs/evaluation_metrics.json
+
+# terrain.randomize 为 false 时使用的固定障碍物。
+obstacles:
+  - [180, 100, 130, 55]
+  - [430, 70, 70, 180]
+  - [690, 100, 160, 60]
+  - [120, 350, 80, 170]
+  - [330, 330, 210, 65]
+  - [650, 330, 75, 210]
+  - [790, 470, 110, 60]
