@@ -1,119 +1,137 @@
-# 基于神经网络的扫地机器人碰撞预测
+# 基于 PyTorch PPO 的机器人局部避障
 
-本实验使用 Pygame 构建带起点和终点的二维扫地机器人仿真。圆形机器人搭载 12 路 360° 测距传感器，PyTorch 多层感知机根据传感器距离、线速度和角速度，预测机器人在未来 `1.0 s` 内是否会发生碰撞。
+本实验使用 36 路 360° 测距、相对局部目标和短时控制历史作为观测。PPO 策略直接输出前向速度与角速度，在静态随机障碍中完成局部绕行。训练环境使用 PyTorch 批量张量计算，Pygame 负责加载策略并显示实际运动轨迹；运行时不使用 A* 航点。
 
 ## 项目组成
 
-- `geometry.py`：圆形—矩形碰撞检测和射线测距。
-- `simulation.py`：机器人运动学、随机场景和未来碰撞标签。
-- `dataset.py`：生成正负样本近似均衡的仿真数据。
-- `network.py`：碰撞预测多层感知机和模型检查点。
-- `train.py`：训练、验证和测试。
-- `evaluate.py`：比较神经网络与最小距离阈值基线。
-- `main.py`：实时 Pygame 可视化与手动/自动控制。
-- `config.yaml`：机器人、传感器、训练和场景参数。
+- `rl_env.py`：GPU/CPU 通用的批量机器人环境、射线和碰撞计算。
+- `policy.py`：零填充射线 CNN 与扁平 MLP Actor-Critic。
+- `ppo.py`：GAE 和 PPO 裁剪更新。
+- `train.py`：课程学习、checkpoint 和 TensorBoard 训练入口。
+- `controller.py`：DIRECT、REACTIVE 和学习策略控制器。
+- `planner.py`：仅用于离线地图检查和路径效率参考的 A*。
+- `evaluate.py`：在固定种子任务上比较四类控制器。
+- `main.py`：Pygame 自动避障演示。
+- `config.yaml`：环境、奖励、模型和训练参数。
 
-所有运行结果保存在当前项目的 `outputs/` 中，不会在 `src` 或 `paper` 之外创建目录。
+训练产物保存在 `src/006/collision_prediction/outputs/`，该目录仅供本地使用。
 
-## 环境
+## 安装环境
+
+激活已有 Conda 环境：
 
 ```bash
 conda activate hands_on
+```
+
+安装依赖：
+
+```bash
 python -m pip install -r src/006/collision_prediction/requirements.txt
 ```
 
-## 快速检查界面
+## 立即查看界面
 
-未训练模型也可以先检查机器人、障碍物和传感器界面：
+REACTIVE 不需要模型，可先检查随机地图、36 条射线和回合逻辑：
 
 ```bash
-python src/006/collision_prediction/main.py
+python src/006/collision_prediction/main.py --controller reactive
 ```
 
-窗口控制：
+窗口按键：
 
-- `↑/W`：加速；
-- `↓/S`：减速；
-- `←/A`、`→/D`：转向；
-- `Space`：停止；
-- `Tab`：切换自动避障模式；
-- `P`：在 `ASTAR` 和 `DIRECT` 导航间切换，并从起点重新开始；
-- `R`：重置；
+- `R`：生成新的局部绕行任务；
+- `Space`：暂停或继续；
 - `Esc`：退出。
 
-未训练时界面显示 `Model: NOT TRAINED`，碰撞概率显示 `N/A`。
+## CNN-PPO 训练
 
-## 起点、终点和单轮实验
-
-起点和终点在 `config.yaml` 中配置：
-
-```yaml
-episode:
-  start: [75.0, 75.0, 0.0]
-  goal: [880.0, 570.0]
-  goal_radius: 28.0
-  max_duration_sec: 60.0
-```
-
-`start` 的三个值依次为水平坐标、垂直坐标和初始朝向角度。机器人进入终点半径、发生碰撞或运行超过最大时长时，本轮结束。界面会绘制起点、目标区域和实际运动轨迹，并显示运行时间、路径长度和剩余目标距离。按 `R` 开始新一轮。
-
-自动模式采用配置好的安全途经点，不运行复杂路径规划或绕墙状态机。机器人依次到达 `episode.waypoints`，最后前往 `episode.goal`。界面会显示当前途经点序号，并绘制实际运动轨迹。
-
-神经网络只负责预测并显示碰撞概率，不参与导航控制。终点也不输入碰撞预测网络，只用于控制和实验终止判断。
-
-### 区分 A* 与碰撞预测
-
-界面明确显示 `Prediction: DISPLAY ONLY`。按 `P` 可在同一张地形上切换：
-
-- `DIRECT`：不使用 A*，机器人直接朝终点行驶，用于观察被隔墙阻挡以及模型何时发出碰撞预警；
-- `ASTAR`：跟随规划路线依次穿过门洞，用于观察路径规划本身的效果。
-
-因此，成功到达终点属于 A* 路径规划结果；神经网络使用 Accuracy、Recall、F1 和碰撞前预警时间单独评价，不能把两者混为同一个避障贡献。
-
-## 随机地形
-
-默认情况下，每次启动程序以及每次按 `R` 重置时都会生成新的分区地形，并重新规划路线。地形由多道贯穿上下边界的纵向隔墙组成，每道墙只保留一个门洞，门洞位置上下交错。因此机器人必须在场地内部连续穿过门洞，不能从顶部或底部绕过障碍。
-
-生成器保证：
-
-- 隔墙横向位置、厚度和门洞大小存在随机变化；
-- 障碍物不会覆盖起点和终点；
-- 隔墙真正分割起点和终点所在区域；
-- A* 路线长度明显大于起终点直线距离；
-- 规划时按照机器人半径膨胀障碍物，避免擦碰墙角。
-
-灰蓝色线表示本轮 A* 规划路线，紫色线表示机器人实际轨迹。相关参数位于 `config.yaml` 的 `terrain` 部分。`seed: null` 表示每次使用不同地形；填写固定整数可复现实验地形。将 `randomize` 改为 `false` 后，程序会使用配置末尾的固定障碍物和途经点。
-
-## 训练模型
-
-先用较少样本确认流程：
+### 1. 确认 CUDA
 
 ```bash
-python src/006/collision_prediction/train.py --samples 2000 --epochs 10
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU')"
 ```
 
-正式训练使用配置中的默认参数：
+预期输出应包含 `True` 和显卡名称。本项目已在 RTX 4060、PyTorch 2.6 CUDA 12.4 环境完成冒烟验证。
+
+### 2. 运行短程冒烟训练
+
+这条命令只验证环境采样、PPO 更新和 checkpoint 保存，不会得到可靠的避障模型：
 
 ```bash
-python src/006/collision_prediction/train.py
+python src/006/collision_prediction/train.py --model cnn --device cuda --num-envs 64 --rollout-steps 32 --total-steps 8192 --no-noise
 ```
 
-训练会生成 `outputs/collision_mlp.pt` 和 `outputs/training_metrics.json`。之后重新运行 `main.py`，界面会实时显示碰撞概率。
+### 3. 运行长程 CNN 训练
 
-PyTorch 的 `BCEWithLogitsLoss` 将 Sigmoid 与二元交叉熵组合，适合当前二分类任务；模型使用 `state_dict` 方式保存，便于复现实验。
-
-## 独立评估
+当前建议单个随机种子最多训练 2000 万环境步：
 
 ```bash
-python src/006/collision_prediction/evaluate.py --samples 4000
+python src/006/collision_prediction/train.py --model cnn --device cuda --num-envs 512 --rollout-steps 128 --total-steps 20000000
 ```
 
-评估脚本使用不同随机种子生成新场景，同时报告神经网络和最小距离阈值规则的 Accuracy、Precision、Recall、F1 与混淆矩阵。结果写入 `outputs/evaluation_metrics.json`。
+训练从课程阶段 0 开始；近期训练回合到达率达到 `0.75` 后依次进入阶段 1 和阶段 2。阶段 2 会加入遮挡目标、窄通道和测距噪声。终端会持续输出 `step`、`stage`、`success` 和平均奖励。
 
-## 测试
+训练产物：
+
+- `outputs/cnn_ppo.pt`：最新 CNN 策略；
+- `outputs/cnn_training_metrics.json`：训练更新历史；
+- `outputs/tensorboard_cnn/`：TensorBoard 日志。
+
+另开一个终端查看训练曲线：
+
+```bash
+tensorboard --logdir src/006/collision_prediction/outputs/tensorboard_cnn
+```
+
+> 注意：当前可运行版本会在每次 PPO 更新后覆盖 `cnn_ppo.pt`，再次执行训练命令会从头开始，尚未实现优化器与课程阶段的完整断点续训。中断训练前应确认这一限制。
+
+## 加载 CNN 策略演示
+
+训练结束后启动 Pygame：
+
+```bash
+python src/006/collision_prediction/main.py --controller cnn --device cuda
+```
+
+运行噪声鲁棒性演示：
+
+```bash
+python src/006/collision_prediction/main.py --controller cnn --device cuda --noise
+```
+
+`R` 会生成新任务。建议连续观察不同障碍布局，而不是只检查一个成功回合。
+
+## 固定种子评估
+
+评估 CNN 的 500 个无噪声任务：
+
+```bash
+python src/006/collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500
+```
+
+评估 CNN 的 500 个噪声任务：
+
+```bash
+python src/006/collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500 --noise
+```
+
+运行非学习 REACTIVE 基线：
+
+```bash
+python src/006/collision_prediction/evaluate.py --controller reactive --device cuda --episodes 500
+```
+
+评估分别报告到达率、碰撞率、超时率、平均路径长度和相对离线 A* 参考路径的路径效率。A* 不参与控制，也不会向 PPO 提供路线。正式达标标准为无噪声到达率不低于 90%、碰撞率不高于 5%、超时率不高于 5%、平均路径比不高于 1.35。
+
+### 当前版本限制
+
+当前训练器依据近期训练回合到达率升级课程，尚未实现此前方案中的“固定 256 回合验证集、连续三次验证达标、完整断点续训和分阶段 checkpoint”。因此，跑满 2000 万步不自动等同于正式训练达标；必须执行上述固定种子评估并检查各项指标。
+
+## 自动测试
 
 ```bash
 python -m pytest src/006/collision_prediction/tests
 ```
 
-论文实验建议比较不同传感器数量、预测时间窗口、隐藏层规模、训练样本量和告警阈值，并通过消融实验验证速度特征、角速度特征与多角度传感器的贡献。
+当前阶段先完成 CNN-PPO 单随机种子训练。论文正式结果仍应在训练流程稳定后补充多个随机种子，并报告均值与标准差。

@@ -1,80 +1,51 @@
-"""简单的途经点导航控制器。"""
+"""DIRECT、REACTIVE 与学习策略控制接口。"""
 
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, replace
-from typing import Any
 
-from simulation import RobotState, distance_to_goal, normalize_angle
-
-
-@dataclass
-class WaypointNavigator:
-    """记录自动模式当前正在前往的途经点序号。"""
-
-    index: int = 0
-    emergency_stop: bool = False
+import torch
+from policy import ActorCritic
 
 
-def goal_navigation_control(
-    state: RobotState,
-    target: tuple[float, float],
-    robot_config: dict[str, Any],
-    navigation_config: dict[str, Any],
-) -> RobotState:
-    """使用比例转向控制机器人朝单个目标点行驶。"""
+def direct_action(observation: torch.Tensor, sensor_count: int) -> torch.Tensor:
+    """只朝目标行驶，不使用测距避障。"""
 
-    max_speed = float(robot_config["max_speed"])
-    max_angular_speed = float(robot_config["max_angular_speed"])
-    target_heading = math.atan2(target[1] - state.y, target[0] - state.x)
-    heading_error = normalize_angle(target_heading - state.heading)
-    angular_speed = min(
-        max(heading_error * 2.0, -max_angular_speed),
-        max_angular_speed,
+    sin_goal = observation[:, sensor_count]
+    cos_goal = observation[:, sensor_count + 1]
+    goal_angle = torch.atan2(sin_goal, cos_goal)
+    turn = (goal_angle / (math.pi / 2.0)).clamp(-1.0, 1.0)
+    speed_ratio = (1.0 - 0.55 * turn.abs()).clamp(0.25, 1.0)
+    return torch.stack((2.0 * speed_ratio - 1.0, turn), dim=1)
+
+
+def reactive_action(observation: torch.Tensor, sensor_count: int) -> torch.Tensor:
+    """使用目标吸引力与障碍排斥力构造确定性基线。"""
+
+    rays = observation[:, :sensor_count]
+    sin_goal = observation[:, sensor_count]
+    cos_goal = observation[:, sensor_count + 1]
+    angles = torch.arange(sensor_count, device=observation.device) * (
+        2.0 * math.pi / sensor_count
     )
+    proximity = ((0.65 - rays) / 0.65).clamp(0.0, 1.0).square()
+    repel_x = -(proximity * torch.cos(angles)[None, :]).sum(dim=1) * 0.45
+    repel_y = -(proximity * torch.sin(angles)[None, :]).sum(dim=1) * 0.65
+    desired_x = cos_goal + repel_x
+    desired_y = sin_goal + repel_y
+    desired_angle = torch.atan2(desired_y, desired_x)
+    turn = (desired_angle / (math.pi / 2.0)).clamp(-1.0, 1.0)
 
-    # 转角较大时降低速度，转向稳定后再恢复巡航速度。
-    turn_ratio = min(abs(heading_error) / math.pi, 1.0)
-    cruise_ratio = float(navigation_config["cruise_speed_ratio"])
-    sharp_turn_ratio = float(navigation_config["sharp_turn_speed_ratio"])
-    speed_ratio = cruise_ratio - (
-        cruise_ratio - sharp_turn_ratio
-    ) * turn_ratio
-    return replace(
-        state,
-        speed=max_speed * speed_ratio,
-        angular_speed=angular_speed,
-    )
+    front_mask = torch.cos(angles) >= 0.5
+    front_clearance = rays[:, front_mask].min(dim=1).values
+    clearance_speed = ((front_clearance - 0.10) / 0.45).clamp(0.05, 0.85)
+    speed_ratio = clearance_speed * (1.0 - 0.65 * turn.abs())
+    return torch.stack((2.0 * speed_ratio - 1.0, turn), dim=1)
 
 
-def waypoint_navigation_control(
-    state: RobotState,
-    route: tuple[tuple[float, float], ...],
-    robot_config: dict[str, Any],
-    navigation_config: dict[str, Any],
-    navigator: WaypointNavigator,
-) -> tuple[RobotState, WaypointNavigator]:
-    """依次跟随途经点，最后一个点应为实验终点。"""
+@torch.no_grad()
+def policy_action(model: ActorCritic, observation: torch.Tensor) -> torch.Tensor:
+    """使用策略均值输出确定性动作。"""
 
-    if not route:
-        raise ValueError("自动导航路线不能为空")
-    navigator.index = min(navigator.index, len(route) - 1)
-    waypoint_radius = float(navigation_config["waypoint_radius"])
-
-    # 进入当前途经点范围后立即切换到下一个点。
-    while (
-        navigator.index < len(route) - 1
-        and distance_to_goal(state, route[navigator.index])
-        <= waypoint_radius
-    ):
-        navigator.index += 1
-
-    navigator.emergency_stop = False
-    controlled = goal_navigation_control(
-        state,
-        route[navigator.index],
-        robot_config,
-        navigation_config,
-    )
-    return controlled, navigator
+    action, _, _, _, _ = model.get_action_and_value(observation, deterministic=True)
+    return action
