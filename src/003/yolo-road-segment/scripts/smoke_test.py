@@ -8,6 +8,7 @@ from ultralytics import YOLO
 from src.common import (
     LOGGER,
     ROOT,
+    clean_amp_artifact,
     ensure_project_dirs,
     print_runtime_info,
     runtime_info,
@@ -62,6 +63,7 @@ def main() -> None:
         plots=True,
         verbose=True,
     )
+    clean_amp_artifact()
     LOGGER.info("Smoke test complete: %s", model.trainer.save_dir)
 
 

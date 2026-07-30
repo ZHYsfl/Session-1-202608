@@ -176,6 +176,17 @@ def write_json(path: str | Path, payload: Any) -> Path:
     return output_path
 
 
+def clean_amp_artifact(root: Path | None = None) -> None:
+    """Remove the temporary yolo26n.pt file Ultralytics downloads for AMP checks."""
+    target = (root or ROOT) / "yolo26n.pt"
+    if target.is_file():
+        try:
+            target.unlink()
+            LOGGER.debug("Removed AMP artifact: %s", target)
+        except OSError as exc:
+            LOGGER.warning("Could not remove AMP artifact %s: %s", target, exc)
+
+
 def merge_not_none(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
     for key, value in overrides.items():

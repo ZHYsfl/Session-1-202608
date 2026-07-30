@@ -1,3 +1,5 @@
+# src/train.py -> 训练模型
+
 from __future__ import annotations
 
 import argparse
@@ -8,6 +10,7 @@ from ultralytics import YOLO
 
 from src.common import (
     LOGGER,
+    clean_amp_artifact,
     ensure_project_dirs,
     load_yaml,
     merge_not_none,
@@ -23,6 +26,7 @@ from src.common import (
 )
 
 
+# 入口与参数解析
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train a YOLO26 road segmentation model.")
     parser.add_argument("--config", default="configs/pipeline.yaml")
@@ -48,6 +52,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def train(args: argparse.Namespace) -> Path:
+    # 初始化
     setup_logging(args.verbose)
     ensure_project_dirs()
     config = load_yaml(args.config)
@@ -69,6 +74,7 @@ def train(args: argparse.Namespace) -> Path:
         "plots": args.plots,
         "exist_ok": args.exist_ok,
     }
+    # 合并参数
     options: dict[str, Any] = merge_not_none(train_cfg, overrides)
 
     data_value = args.data or project_cfg.get("data", "configs/road_seg.yaml")
@@ -77,11 +83,14 @@ def train(args: argparse.Namespace) -> Path:
         Path(project_cfg.get("output_dir", "outputs")) / "train"
     )
 
+    # 选择设备与固定随机种子
     device = select_device(options.pop("device", "auto"))
     seed = int(options.get("seed", 42))
     seed_everything(seed)
     info = runtime_info(device)
     print_runtime_info(info)
+
+    # 解析模型与数据路径
 
     if args.resume:
         model_source = resolve_ultralytics_resource(args.resume)
@@ -90,6 +99,8 @@ def train(args: argparse.Namespace) -> Path:
         model_source = resolve_ultralytics_resource(model_value)
 
     data_source = resolve_dataset_config(data_value)
+
+    # 创建输出目录
     project_dir = resolve_local_path(output_value)
     project_dir.mkdir(parents=True, exist_ok=True)
 
@@ -107,9 +118,14 @@ def train(args: argparse.Namespace) -> Path:
     LOGGER.info("Dataset config: %s", data_source)
     LOGGER.info("Training output: %s/%s", project_dir, options.get("name"))
 
+    # 加载模型并训练
     model = YOLO(model_source, task="segment")
     model.train(**options)
 
+    # 删除 Ultralytics AMP 检查遗留的临时文件
+    clean_amp_artifact()
+
+    # 保存元数据
     save_dir = Path(model.trainer.save_dir).resolve()
     metadata = {
         "stage": "train",

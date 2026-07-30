@@ -1,3 +1,5 @@
+# src/predict.py -> 使用训练好的模型进行预测，对图片/视频做推理
+
 from __future__ import annotations
 
 import argparse

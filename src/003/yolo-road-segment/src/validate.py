@@ -1,3 +1,5 @@
+# src/validate.py -> 在验证集上评估模型
+
 from __future__ import annotations
 
 import argparse

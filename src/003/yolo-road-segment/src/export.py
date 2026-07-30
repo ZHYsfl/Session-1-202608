@@ -1,3 +1,5 @@
+# src/export.py -> 导出训练好的模型为 ONNX 或其他格式
+
 from __future__ import annotations
 
 import argparse

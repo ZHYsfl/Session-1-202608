@@ -1,0 +1,51 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Editable install metadata
+*.egg-info/
+.eggs/
+
+# Environment lock (generated per machine)
+environment.lock.txt
+
+# Experiment outputs
+outputs/
+
+# Datasets (large or generated)
+datasets/
+
+# Pretrained weights / checkpoints
+models/
+
+# Ultralytics AMP-check artifact downloaded to project root
+/yolo26n.pt
+
+# Test inputs / raw media
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wmv
+*.m4v
+test_images/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
