@@ -1,0 +1,65 @@
+experiment:
+  version: b3-cartpole-v1
+
+environment:
+  gravity: 9.8
+  cart_mass: 1.0
+  pole_mass: 0.1
+  half_pole_length: 0.5
+  force_magnitude: 10.0
+  time_step: 0.02
+  position_threshold: 2.4
+  angle_threshold_degrees: 12.0
+  max_steps: 500
+  alive_reward: 1.0
+  failure_penalty: -10.0
+  success_bonus: 10.0
+
+render:
+  width: 900
+  height: 600
+  fps: 60
+  world_scale: 145.0
+
+dqn:
+  episodes: 600
+  hidden_sizes: [128, 128]
+  replay_capacity: 50000
+  batch_size: 128
+  learning_rate: 0.0005
+  gamma: 0.99
+  learning_starts: 1000
+  train_frequency: 1
+  target_update_frequency: 1000
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 50000
+  gradient_clip: 10.0
+
+q_learning:
+  episodes: 5000
+  bins: [10, 12, 20, 20]
+  velocity_limits: [-3.0, 3.0]
+  angular_velocity_limits: [-3.5, 3.5]
+  learning_rate: 0.15
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.03
+  epsilon_decay_episodes: 3500
+
+training:
+  seed: 42
+  moving_average_window: 100
+  solved_mean_steps: 475.0
+  log_interval: 20
+
+evaluation:
+  episodes: 100
+  seed: 10000
+
+paths:
+  dqn_checkpoint: outputs/dqn_cartpole.pt
+  q_learning_checkpoint: outputs/q_learning_cartpole.npz
+  dqn_metrics: outputs/dqn_training_metrics.json
+  q_learning_metrics: outputs/q_learning_training_metrics.json
+  tensorboard_root: outputs/tensorboard

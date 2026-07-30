@@ -1,0 +1,7 @@
+numpy>=1.26
+pygame-ce>=2.5
+PyYAML>=6.0
+torch>=2.4
+tensorboard>=2.17
+pytest>=8.0
+ruff>=0.8
