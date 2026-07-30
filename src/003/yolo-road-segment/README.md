@@ -20,13 +20,13 @@ yolo-road-segment/
 ├── models/                    # 预训练权重，不提交 Git
 ├── outputs/                   # 实验输出，不提交 Git
 ├── scripts/
-│   ├── bootstrap.ps1          # 创建 uv 环境并下载资源
+│   ├── bootstrap.py           # 创建 uv 环境并下载资源
 │   ├── prepare_assets.py      # 下载模型和 COCO8-Seg
 │   ├── smoke_test.py          # 小数据集冒烟测试
 │   ├── extract_frames.py      # 从视频抽帧
 │   ├── split_dataset.py       # 划分数据集
 │   ├── check_dataset.py       # 检查图像和分割标签
-│   └── run_pipeline.ps1       # 串联训练、验证和推理
+│   └── run_pipeline.py        # 串联训练、验证和推理
 └── src/
     ├── common.py
     ├── train.py
@@ -37,10 +37,16 @@ yolo-road-segment/
 
 ## 2. 一键搭建环境
 
-在项目根目录打开 PowerShell：
+需要先安装 [uv](https://docs.astral.sh/uv/)。确认 uv 可用后，在项目根目录运行：
 
-```powershell
-.\scripts\bootstrap.ps1
+```bash
+python scripts/bootstrap.py
+```
+
+如果系统没有 Python，可先用 uv 自带的 Python 运行器：
+
+```bash
+uv run --python 3.11 scripts/bootstrap.py
 ```
 
 该脚本执行以下工作：
@@ -54,20 +60,20 @@ yolo-road-segment/
 
 强制重建环境：
 
-```powershell
-.\scripts\bootstrap.ps1 -Recreate
+```bash
+python scripts/bootstrap.py --recreate
 ```
 
 指定 CPU：
 
-```powershell
-.\scripts\bootstrap.ps1 -TorchBackend cpu
+```bash
+python scripts/bootstrap.py --torch-backend cpu
 ```
 
 ## 3. 冒烟测试
 
-```powershell
-.\scripts\smoke_test.ps1
+```bash
+python -m scripts.smoke_test
 ```
 
 使用 COCO8-Seg 训练 3 轮，用于确认模型、数据加载器、PyTorch 和显卡均可正常工作。
@@ -76,9 +82,9 @@ yolo-road-segment/
 
 ### 从视频抽帧
 
-```powershell
-.\.venv\Scripts\python.exe -m scripts.extract_frames D:\videos `
-    --output datasets/road_raw/images `
+```bash
+python -m scripts.extract_frames D:\videos \
+    --output datasets/road_raw/images \
     --interval 2
 ```
 
@@ -90,16 +96,16 @@ datasets/road_raw/labels/
 
 ### 划分数据集
 
-```powershell
-.\.venv\Scripts\python.exe -m scripts.split_dataset --clean
+```bash
+python -m scripts.split_dataset --clean
 ```
 
 默认按照 `8:1:1` 划分训练、验证和测试集，随机种子固定为 42。
 
 ### 检查数据
 
-```powershell
-.\.venv\Scripts\python.exe -m scripts.check_dataset
+```bash
+python -m scripts.check_dataset
 ```
 
 检查内容包括：
@@ -115,8 +121,8 @@ datasets/road_raw/labels/
 
 ## 5. 完整流水线
 
-```powershell
-.\scripts\run_pipeline.ps1 -Stage all -CleanRun
+```bash
+python -m scripts.run_pipeline --stage all --clean-run
 ```
 
 依次执行：
@@ -127,36 +133,36 @@ check -> train -> val -> predict
 
 只训练：
 
-```powershell
-.\scripts\run_pipeline.ps1 -Stage train -CleanRun
+```bash
+python -m scripts.run_pipeline --stage train --clean-run
 ```
 
 指定 GPU 0：
 
-```powershell
-.\scripts\run_pipeline.ps1 -Stage all -Device 0 -CleanRun
+```bash
+python -m scripts.run_pipeline --stage all --device 0 --clean-run
 ```
 
 ## 6. 单独运行核心阶段
 
-```powershell
+```bash
 # 训练
-.\.venv\Scripts\python.exe -m src.train
+python -m src.train
 
 # 验证
-.\.venv\Scripts\python.exe -m src.validate
+python -m src.validate
 
 # 推理
-.\.venv\Scripts\python.exe -m src.predict --source test_images
+python -m src.predict --source test_images
 
 # 导出 ONNX
-.\.venv\Scripts\python.exe -m src.export --format onnx
+python -m src.export --format onnx
 ```
 
 临时覆盖配置参数：
 
-```powershell
-.\.venv\Scripts\python.exe -m src.train --epochs 100 --batch 4 --device 0
+```bash
+python -m src.train --epochs 100 --batch 4 --device 0
 ```
 
 长期实验参数应修改 `configs/pipeline.yaml`，保证实验配置能够提交和复现。

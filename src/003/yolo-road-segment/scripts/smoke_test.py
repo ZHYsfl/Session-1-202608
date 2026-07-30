@@ -26,6 +26,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--verbose", action="store_true")
     return parser
 
+# 定义命令行参数：
+#   --model: 要加载的 YOLO 分割模型（默认 models/yolo26n-seg.pt）
+#   --epochs: 训练轮数（默认 3）
+#   --imgsz: 输入图像尺寸（默认 640）
+#   --batch: batch size（默认 2）
+#   --device: 计算设备（默认 auto，由 select_device 自动选择 CPU/GPU）
+#   --verbose: 是否输出更详细的日志
+
 
 def main() -> None:
     args = build_parser().parse_args()
@@ -34,13 +42,13 @@ def main() -> None:
     model_path = (ROOT / args.model).resolve()
     if not model_path.exists():
         raise FileNotFoundError(
-            f"Missing model: {model_path}. Run scripts/bootstrap.ps1 first."
+            f"Missing model: {model_path}. Run 'python scripts/bootstrap.py' first."
         )
     device = select_device(args.device)
     print_runtime_info(runtime_info(device))
     model = YOLO(str(model_path), task="segment")
     model.train(
-        data="coco8-seg.yaml",
+        data="coco8-seg.yaml",  # 使用 Ultralytics 内置的 COCO8-Seg 数据集配置
         epochs=args.epochs,
         imgsz=args.imgsz,
         batch=args.batch,
