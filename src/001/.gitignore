@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 采集数据与重建产物（可再生，不入库）
+data/
+
+# Webots 自动生成的隐藏文件（视点、缩略图）
+worlds/.??*
