@@ -190,9 +190,22 @@ $[-0.05,0.05]$.
 
 An episode terminates if $|x|>2.4$ or
 $|\theta|>12^\circ$. It succeeds if neither failure occurs for 500 steps.
-Each valid transition receives $+1$; failure adds $-10$, while reaching the
-500-step limit adds $+10$. Success rate and episode length are therefore more
-direct evaluation measures than return, which is nearly determined by
+The reward function is
+\begin{equation}
+r_{t+1}=1+
+\begin{cases}
+-10, & |x_{t+1}|>2.4\ \text{or}
+        \quad |\theta_{t+1}|>12^\circ,\\
++10, & t+1=500\ \text{without failure},\\
+0, & \text{otherwise}.
+\end{cases}
+\label{eq:reward}
+\end{equation}
+Thus, an ordinary transition yields $+1$, the failure transition yields
+$-9$, and the successful terminal transition yields $+11$. The undiscounted
+episode return is $T-10$ when failure occurs at step $T$, and 510 when the
+agent survives all 500 steps. Success rate and episode length are therefore
+more direct evaluation measures than return, which is nearly determined by
 survival time.
 
 \subsection{Tabular Controller}
@@ -281,6 +294,10 @@ measurements.
 Training ran on Windows with Python 3.10.19, NumPy 1.26.4, PyTorch
 2.6.0+cu124, and an NVIDIA GeForce RTX 4060 Laptop GPU. The complete matrix
 contains $7\times3=21$ learned runs and 1,470,000 environment interactions.
+Each configuration--seed pair was trained exactly once, and the complete
+$7\times3$ matrix was not independently repeated. Consequently, the three
+observations reported for each learned method are single training runs under
+seeds 42, 123, and 2026, rather than repeated runs under the same seed.
 A random policy is evaluated under the same episode rules as an untrained
 reference. The source tree records a configuration hash, fixed seeds,
 checkpoint metadata, per-episode diagnostics, validation curves, and
@@ -460,6 +477,13 @@ control or environments with larger action spaces. No confidence interval or
 hypothesis test can compensate for the small number of independently trained
 agents, so the paper reports effect sizes and individual-seed behavior rather
 than claiming statistical significance.
+
+The formal matrix was executed only once: there is one training trajectory
+for every method--seed pair and no second execution of the full protocol.
+The experiment therefore measures sensitivity across three random seeds but
+does not directly measure rerun reproducibility under an identical seed and
+software--hardware state. Additional independent repetitions are needed
+before making stronger claims about run-to-run stability.
 
 Finally, the cumulative DQN sequence changes one intended factor at each
 stage, but the label ``Double DQN'' should not be interpreted as isolating
