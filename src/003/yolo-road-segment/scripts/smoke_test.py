@@ -14,6 +14,7 @@ from src.common import (
     runtime_info,
     select_device,
     setup_logging,
+    timestamp_suffix,
 )
 
 
@@ -48,6 +49,7 @@ def main() -> None:
     device = select_device(args.device)
     print_runtime_info(runtime_info(device))
     model = YOLO(str(model_path), task="segment")
+    run_name = f"coco8_seg_{timestamp_suffix()}"
     model.train(
         data="coco8-seg.yaml",  # 使用 Ultralytics 内置的 COCO8-Seg 数据集配置
         epochs=args.epochs,
@@ -56,7 +58,7 @@ def main() -> None:
         device=device,
         workers=0,
         project=str((ROOT / "outputs" / "smoke").resolve()),
-        name="coco8_seg",
+        name=run_name,
         exist_ok=True,
         seed=42,
         deterministic=True,

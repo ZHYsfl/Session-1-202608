@@ -47,16 +47,31 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     python = find_python(root)
 
-    train_dir = root / "outputs" / "train" / args.run_name
-    best_model = train_dir / "weights" / "best.pt"
+    train_root = root / "outputs" / "train"
+
+    def latest_train_dir() -> Path | None:
+        """Find the most recent training directory with a best.pt checkpoint."""
+        if not train_root.exists():
+            return None
+        candidates = sorted(
+            train_root.glob(f"{args.run_name}_*"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for candidate in candidates:
+            if candidate.is_dir() and (candidate / "weights" / "best.pt").exists():
+                return candidate
+        return None
 
     def invoke_check() -> None:
         run([str(python), "-m", "scripts.check_dataset", "--data", "configs/road_seg.yaml"])
 
     def invoke_train() -> None:
-        if args.clean_run and train_dir.exists():
-            print(f"Removing existing training directory: {train_dir}")
-            shutil.rmtree(train_dir)
+        if args.clean_run and train_root.exists():
+            for old_dir in train_root.glob(f"{args.run_name}_*"):
+                if old_dir.is_dir():
+                    print(f"Removing existing training directory: {old_dir}")
+                    shutil.rmtree(old_dir)
         run([
             str(python), "-m", "src.train",
             "--name", args.run_name,
@@ -65,8 +80,10 @@ def main() -> int:
         ])
 
     def invoke_val() -> None:
-        if not best_model.exists():
-            raise FileNotFoundError(f"Best model not found: {best_model}")
+        train_dir = latest_train_dir()
+        if train_dir is None:
+            raise FileNotFoundError(f"Best model not found for run '{args.run_name}'")
+        best_model = train_dir / "weights" / "best.pt"
         run([
             str(python), "-m", "src.validate",
             "--model", str(best_model),
@@ -76,8 +93,10 @@ def main() -> int:
         ])
 
     def invoke_predict() -> None:
-        if not best_model.exists():
-            raise FileNotFoundError(f"Best model not found: {best_model}")
+        train_dir = latest_train_dir()
+        if train_dir is None:
+            raise FileNotFoundError(f"Best model not found for run '{args.run_name}'")
+        best_model = train_dir / "weights" / "best.pt"
         run([
             str(python), "-m", "src.predict",
             "--model", str(best_model),

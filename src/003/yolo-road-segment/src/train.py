@@ -22,6 +22,7 @@ from src.common import (
     seed_everything,
     select_device,
     setup_logging,
+    timestamp_suffix,
     write_json,
 )
 
@@ -47,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deterministic", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--exist-ok", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--timestamp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -76,6 +78,11 @@ def train(args: argparse.Namespace) -> Path:
     }
     # 合并参数
     options: dict[str, Any] = merge_not_none(train_cfg, overrides)
+
+    # 为输出目录添加时间戳，避免多次运行相互覆盖
+    if args.timestamp:
+        base_name = options.get("name") or "train"
+        options["name"] = f"{base_name}_{timestamp_suffix()}"
 
     data_value = args.data or project_cfg.get("data", "configs/road_seg.yaml")
     model_value = args.model or project_cfg.get("model", "models/yolo26n-seg.pt")

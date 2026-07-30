@@ -11,6 +11,7 @@ from ultralytics import YOLO
 from src.common import (
     LOGGER,
     ensure_project_dirs,
+    find_latest_train_dir,
     load_yaml,
     merge_not_none,
     print_runtime_info,
@@ -20,6 +21,7 @@ from src.common import (
     runtime_info,
     select_device,
     setup_logging,
+    timestamp_suffix,
     write_json,
 )
 
@@ -41,6 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--save-json", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--exist-ok", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--timestamp", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -85,15 +88,37 @@ def validate(args: argparse.Namespace) -> Path:
         "exist_ok": args.exist_ok,
     }
     options = merge_not_none(val_cfg, overrides)
+
+    # 为输出目录添加时间戳，避免多次运行相互覆盖
+    if args.timestamp:
+        base_name = options.get("name") or "val"
+        options["name"] = f"{base_name}_{timestamp_suffix()}"
+
     model_value = args.model or options.pop("model", None) or project_cfg.get("model")
     data_value = args.data or project_cfg.get("data", "configs/road_seg.yaml")
     output_value = args.project or str(
         Path(project_cfg.get("output_dir", "outputs")) / "val"
     )
 
-    model_source = resolve_ultralytics_resource(model_value)
+    if model_value is not None:
+        model_source = resolve_ultralytics_resource(model_value)
+        if not Path(model_source).exists() and args.model is None:
+            # 配置文件中的路径已失效（例如训练目录已带时间戳），尝试自动定位最新训练结果
+            model_value = None
+    else:
+        model_source = None
+
+    if model_value is None:
+        latest = find_latest_train_dir()
+        if latest is None:
+            raise FileNotFoundError(
+                "No model specified and no training output found."
+            )
+        model_source = str(latest / "weights" / "best.pt")
+        LOGGER.info("Auto-resolved latest training checkpoint: %s", model_source)
+
     data_source = resolve_dataset_config(data_value)
-    if any(sep in str(model_value) for sep in ("/", "\\")) and not Path(model_source).exists():
+    if not Path(model_source).exists():
         raise FileNotFoundError(f"Model checkpoint does not exist: {model_source}")
 
     device = select_device(options.pop("device", "auto"))

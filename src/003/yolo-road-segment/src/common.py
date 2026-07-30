@@ -5,6 +5,7 @@ import logging
 import math
 import platform
 import random
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,30 @@ def clean_amp_artifact(root: Path | None = None) -> None:
             LOGGER.debug("Removed AMP artifact: %s", target)
         except OSError as exc:
             LOGGER.warning("Could not remove AMP artifact %s: %s", target, exc)
+
+
+def timestamp_suffix(fmt: str = "%Y%m%d_%H%M%S") -> str:
+    """Return a timestamp string suitable for directory names."""
+    return datetime.now().strftime(fmt)
+
+
+def find_latest_train_dir(
+    root: Path | None = None, base_name: str = "road_yolo26n_seg"
+) -> Path | None:
+    """Find the most recent training directory that contains a best.pt checkpoint."""
+    root = root or ROOT
+    train_root = root / "outputs" / "train"
+    if not train_root.exists():
+        return None
+    candidates = sorted(
+        (p for p in train_root.glob(f"{base_name}_*") if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for candidate in candidates:
+        if (candidate / "weights" / "best.pt").exists():
+            return candidate
+    return None
 
 
 def merge_not_none(base: dict[str, Any], overrides: dict[str, Any]) -> dict[str, Any]:

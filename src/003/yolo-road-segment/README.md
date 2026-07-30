@@ -76,7 +76,11 @@ python scripts/bootstrap.py --torch-backend cpu
 python -m scripts.smoke_test
 ```
 
-使用 COCO8-Seg 训练 3 轮，用于确认模型、数据加载器、PyTorch 和显卡均可正常工作。
+使用 COCO8-Seg 训练 3 轮，用于确认模型、数据加载器、PyTorch 和显卡均可正常工作。每次运行会生成带时间戳的目录：
+
+```text
+outputs/smoke/coco8_seg_20260731_143052/
+```
 
 ## 4. 数据准备
 
@@ -131,6 +135,11 @@ python -m scripts.run_pipeline --stage all --clean-run
 check -> train -> val -> predict
 ```
 
+- 训练结果保存在 `outputs/train/{run_name}_{时间戳}/`
+- 验证结果保存在 `outputs/val/{run_name}_val_{时间戳}/`
+- 推理结果保存在 `outputs/predict/{run_name}_predict_{时间戳}/`
+- `run_pipeline.py` 会自动找到最新的训练目录并用于后续验证/推理
+
 只训练：
 
 ```bash
@@ -146,13 +155,13 @@ python -m scripts.run_pipeline --stage all --device 0 --clean-run
 ## 6. 单独运行核心阶段
 
 ```bash
-# 训练
+# 训练（输出目录会自动附加时间戳）
 python -m src.train
 
-# 验证
+# 验证（不指定 --model 时自动使用最新的训练结果）
 python -m src.validate
 
-# 推理
+# 推理（不指定 --model 时自动使用最新的训练结果）
 python -m src.predict --source test_images
 
 # 导出 ONNX
@@ -165,17 +174,28 @@ python -m src.export --format onnx
 python -m src.train --epochs 100 --batch 4 --device 0
 ```
 
+如果希望输出目录不带时间戳（例如用于固定路径的自动化脚本），可添加 `--no-timestamp`：
+
+```bash
+python -m src.train --no-timestamp
+python -m src.validate --no-timestamp
+python -m src.predict --no-timestamp --source test_images
+```
+
 长期实验参数应修改 `configs/pipeline.yaml`，保证实验配置能够提交和复现。
 
 ## 7. 主要输出
 
+每次运行都会生成带时间戳的独立目录，例如：
+
 ```text
-outputs/train/road_yolo26n_seg/
+outputs/train/road_yolo26n_seg_20260731_143052/
 ├── weights/best.pt
 ├── weights/last.pt
 ├── results.csv
 ├── results.png
+├── labels.jpg
 └── run_metadata.json
 ```
 
-验证指标写入 `metrics_summary.json`，推理信息写入 `prediction_summary.json`。
+验证指标写入 `outputs/val/road_validation_20260731_143100/metrics_summary.json`，推理信息写入 `outputs/predict/road_prediction_20260731_143105/prediction_summary.json`。
