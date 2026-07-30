@@ -61,7 +61,12 @@ def build_controller(
         raise FileNotFoundError(
             f"找不到 {checkpoint}；请先运行 train.py --model {name}"
         )
-    model, _ = load_policy(checkpoint, config["model"], device)
+    model, _ = load_policy(
+        checkpoint,
+        config["model"],
+        device,
+        expected_version=str(config["experiment"]["version"]),
+    )
     return lambda obs: policy_action(model, obs), model
 
 
@@ -131,6 +136,8 @@ def draw_status(
         f"Status: {status}",
         f"Paused: {'YES' if paused else 'NO'}",
         f"Noise: {'ON' if noisy else 'OFF'}",
+        f"Stage: {snapshot['stage']}",
+        f"Gates/Bends: {snapshot['gate_count']}/{snapshot['bend_count']}",
         f"Step: {snapshot['step_count']}/{env.max_steps}",
         f"Path: {float(snapshot['path_length']):.1f} px",
         f"Device: {env.device}",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import torch
 from common import load_config
-from policy import ActorCritic
+from policy import ActorCritic, CircularConvBlock
 from ppo import compute_gae
 
 
@@ -38,3 +38,27 @@ def test_gae_stops_bootstrap_at_terminal() -> None:
     )
     assert torch.allclose(advantages[:, 0], torch.tensor([3.0, 2.0]))
     assert torch.allclose(returns, advantages)
+
+
+def test_circular_convolution_wraps_ray_boundaries() -> None:
+    block = CircularConvBlock(1, 4, kernel_size=5)
+    rays = torch.zeros((1, 1, 36))
+    rays[:, :, 0] = 1.0
+    shifted = torch.roll(rays, 4, dims=2)
+    with torch.no_grad():
+        first = block(rays)
+        second = block(shifted)
+    assert torch.allclose(torch.roll(first, 4, dims=2), second, atol=1e-6)
+
+
+def test_cnn_preserves_obstacle_direction() -> None:
+    config = load_config()
+    model = ActorCritic(43, 36, "cnn", config["model"])
+    front = torch.zeros((1, 43))
+    side = torch.zeros((1, 43))
+    front[0, 0] = 1.0
+    side[0, 9] = 1.0
+    with torch.no_grad():
+        front_features = model.encode(front)
+        side_features = model.encode(side)
+    assert not torch.allclose(front_features, side_features)

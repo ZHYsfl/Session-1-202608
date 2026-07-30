@@ -11,7 +11,7 @@ from torch.distributions import Normal
 
 
 def _initialize_layer(layer: nn.Module, gain: float = 1.0) -> nn.Module:
-    """使用 PPO 常见的正交初始化。"""
+    """使用正交初始化稳定 PPO 训练。"""
 
     if isinstance(layer, (nn.Linear, nn.Conv1d)):
         nn.init.orthogonal_(layer.weight, gain)
@@ -20,8 +20,43 @@ def _initialize_layer(layer: nn.Module, gain: float = 1.0) -> nn.Module:
     return layer
 
 
+class CircularConvBlock(nn.Module):
+    """在 360° 射线首尾处使用环形填充的一维卷积块。"""
+
+    def __init__(
+        self,
+        input_channels: int,
+        output_channels: int,
+        *,
+        kernel_size: int,
+        dilation: int = 1,
+    ) -> None:
+        super().__init__()
+        total_padding = dilation * (kernel_size - 1)
+        self.left_padding = total_padding // 2
+        self.right_padding = total_padding - self.left_padding
+        self.conv = _initialize_layer(
+            nn.Conv1d(
+                input_channels,
+                output_channels,
+                kernel_size=kernel_size,
+                dilation=dilation,
+            ),
+            gain=nn.init.calculate_gain("relu"),
+        )
+        self.activation = nn.ReLU()
+
+    def forward(self, values: torch.Tensor) -> torch.Tensor:
+        padded = nn.functional.pad(
+            values,
+            (self.left_padding, self.right_padding),
+            mode="circular",
+        )
+        return self.activation(self.conv(padded))
+
+
 class ActorCritic(nn.Module):
-    """支持射线 CNN 主模型与扁平 MLP 对照模型。"""
+    """支持保留角度结构的射线 CNN 与扁平 MLP 对照模型。"""
 
     def __init__(
         self,
@@ -41,24 +76,18 @@ class ActorCritic(nn.Module):
 
         if model_type == "cnn":
             channels = [int(value) for value in model_config["ray_channels"]]
+            sectors = int(model_config["ray_sectors"])
+            if sectors <= 1 or sectors > sensor_count:
+                raise ValueError("ray_sectors 必须位于 2 到 sensor_count 之间")
             self.ray_encoder = nn.Sequential(
-                _initialize_layer(
-                    nn.Conv1d(1, channels[0], kernel_size=5, padding=2),
-                    gain=nn.init.calculate_gain("relu"),
+                CircularConvBlock(1, channels[0], kernel_size=5),
+                CircularConvBlock(
+                    channels[0],
+                    channels[1],
+                    kernel_size=5,
+                    dilation=2,
                 ),
-                nn.ReLU(),
-                _initialize_layer(
-                    nn.Conv1d(
-                        channels[0],
-                        channels[1],
-                        kernel_size=5,
-                        dilation=2,
-                        padding=4,
-                    ),
-                    gain=nn.init.calculate_gain("relu"),
-                ),
-                nn.ReLU(),
-                nn.AdaptiveAvgPool1d(1),
+                nn.AdaptiveAvgPool1d(sectors),
                 nn.Flatten(),
             )
             auxiliary_hidden = int(model_config["auxiliary_hidden"])
@@ -72,7 +101,7 @@ class ActorCritic(nn.Module):
             fused_hidden = int(model_config["fused_hidden"])
             self.trunk = nn.Sequential(
                 _initialize_layer(
-                    nn.Linear(channels[1] + auxiliary_hidden, fused_hidden),
+                    nn.Linear(channels[1] * sectors + auxiliary_hidden, fused_hidden),
                     gain=nn.init.calculate_gain("tanh"),
                 ),
                 nn.Tanh(),
@@ -151,34 +180,49 @@ class ActorCritic(nn.Module):
         return action, raw_action, log_probability, entropy, value
 
 
+def policy_payload(
+    model: ActorCritic,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    """构造可由演示和评估脚本读取的策略数据。"""
+
+    return {
+        "model_state": model.state_dict(),
+        "observation_dim": model.observation_dim,
+        "sensor_count": model.sensor_count,
+        "model_type": model.model_type,
+        "metadata": metadata,
+    }
+
+
 def save_policy(
     path: Path,
     model: ActorCritic,
     metadata: dict[str, Any],
 ) -> None:
-    """保存可恢复的策略 state_dict 和结构元数据。"""
+    """保存仅用于推理的策略 checkpoint。"""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state": model.state_dict(),
-            "observation_dim": model.observation_dim,
-            "sensor_count": model.sensor_count,
-            "model_type": model.model_type,
-            "metadata": metadata,
-        },
-        path,
-    )
+    torch.save(policy_payload(model, metadata), path)
 
 
 def load_policy(
     path: Path,
     model_config: dict[str, Any],
     device: torch.device,
+    *,
+    expected_version: str | None = None,
 ) -> tuple[ActorCritic, dict[str, Any]]:
-    """从 checkpoint 恢复策略并切换为评估模式。"""
+    """恢复策略并拒绝不兼容的实验版本。"""
 
     checkpoint = torch.load(path, map_location=device, weights_only=False)
+    metadata = dict(checkpoint.get("metadata", {}))
+    checkpoint_version = metadata.get("experiment_version")
+    if expected_version is not None and checkpoint_version != expected_version:
+        raise RuntimeError(
+            f"checkpoint 版本不匹配：需要 {expected_version}，"
+            f"实际为 {checkpoint_version!r}"
+        )
     model = ActorCritic(
         int(checkpoint["observation_dim"]),
         int(checkpoint["sensor_count"]),
@@ -187,4 +231,4 @@ def load_policy(
     ).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
-    return model, dict(checkpoint.get("metadata", {}))
+    return model, metadata

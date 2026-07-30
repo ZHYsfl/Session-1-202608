@@ -5,7 +5,7 @@ from __future__ import annotations
 import heapq
 import math
 from collections.abc import Iterable
-from itertools import count
+from itertools import count, pairwise
 
 Rect = tuple[float, float, float, float]
 Cell = tuple[int, int]
@@ -50,7 +50,7 @@ def _occupied_cells(
     return occupied, columns, rows
 
 
-def astar_path_length(
+def astar_path(
     width: float,
     height: float,
     obstacles: Iterable[Rect],
@@ -58,9 +58,9 @@ def astar_path_length(
     goal: Point,
     clearance: float,
     *,
-    cell_size: float = 10.0,
-) -> float | None:
-    """返回安全网格上的最短路径长度；无解时返回 None。"""
+    cell_size: float = 5.0,
+) -> list[Point] | None:
+    """返回安全网格上的最短路径坐标；无解时返回 None。"""
 
     occupied, columns, rows = _occupied_cells(
         width, height, obstacles, clearance, cell_size
@@ -74,10 +74,22 @@ def astar_path_length(
     sequence = count()
     heapq.heappush(queue, (0.0, next(sequence), start_cell))
     costs = {start_cell: 0.0}
+    parents: dict[Cell, Cell] = {}
     while queue:
         _, _, current = heapq.heappop(queue)
         if current == goal_cell:
-            return costs[current]
+            cells = [current]
+            while current != start_cell:
+                current = parents[current]
+                cells.append(current)
+            cells.reverse()
+            return [
+                (
+                    (column + 0.5) * cell_size,
+                    (row + 0.5) * cell_size,
+                )
+                for column, row in cells
+            ]
         for dx, dy in (
             (-1, -1),
             (0, -1),
@@ -107,6 +119,7 @@ def astar_path_length(
             if candidate >= costs.get(neighbor, float("inf")):
                 continue
             costs[neighbor] = candidate
+            parents[neighbor] = current
             heuristic = cell_size * math.hypot(
                 goal_cell[0] - neighbor[0],
                 goal_cell[1] - neighbor[1],
@@ -116,3 +129,29 @@ def astar_path_length(
                 (candidate + heuristic, next(sequence), neighbor),
             )
     return None
+
+
+def astar_path_length(
+    width: float,
+    height: float,
+    obstacles: Iterable[Rect],
+    start: Point,
+    goal: Point,
+    clearance: float,
+    *,
+    cell_size: float = 5.0,
+) -> float | None:
+    """返回安全网格上的最短路径长度；无解时返回 None。"""
+
+    path = astar_path(
+        width,
+        height,
+        obstacles,
+        start,
+        goal,
+        clearance,
+        cell_size=cell_size,
+    )
+    if path is None:
+        return None
+    return sum(math.dist(first, second) for first, second in pairwise(path))
