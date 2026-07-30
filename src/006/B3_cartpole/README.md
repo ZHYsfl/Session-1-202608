@@ -109,6 +109,9 @@ python src/006/B3_cartpole/main.py --algorithm dqn
 
 `formal_experiments.yaml` 固定了论文实验协议：4组 DQN 消融、3组 Q-Learning 分箱、3个训练种子、每个模型70,000个环境步。正式流水线与前面的单模型教学命令相互独立。
 
+已经完成的正式实验数值、稳定性分析和报告注意事项见
+[`EVALUATION_SUMMARY.md`](EVALUATION_SUMMARY.md)。
+
 查看完整矩阵（要训练哪些算法版本、每个版本使用哪些随机种子，以及每次训练运行多少环境交互步）：
 
 ```bash
