@@ -160,3 +160,9 @@ node_modules/
 dist/
 
 
+
+# 实验中间产物(保留best模型和原始数据,排除中间checkpoint)
+src/002/models/checkpoint_epoch_*.pth
+src/002/*_backup_*.zip
+src/002/*.log
+src/002/data/ik_dataset.h5

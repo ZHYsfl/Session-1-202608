@@ -45,18 +45,19 @@ def main():
 
     # Create data loaders
     batch_size = config['training']['hyperparameters']['batch_size']
+    # Windows下num_workers=0避免多进程DataLoader卡死
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
+        num_workers=0,
         pin_memory=(args.device == 'cuda')
     )
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         shuffle=False,
-        num_workers=4,
+        num_workers=0,
         pin_memory=(args.device == 'cuda')
     )
 

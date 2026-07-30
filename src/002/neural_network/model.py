@@ -142,7 +142,7 @@ def prepare_input(position: np.ndarray,
         np.sin(alpha), np.cos(alpha),
         np.sin(psi), np.cos(psi),
         current_joints[0], current_joints[1], current_joints[2],
-        current_joints[4], current_joints[4]
+        current_joints[3], current_joints[4]
     ])
 
 

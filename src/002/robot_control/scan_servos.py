@@ -174,7 +174,7 @@ def scan_servos_dynamixel(port: str, baudrate: int = 1000000) -> List[int]:
         List of found servo IDs
     """
     try:
-        from dynamixel_sdk import *
+        import dynamixel_sdk
     except ImportError:
         print("⚠️ dynamixel-sdk 未安装")
         print("请运行: pip install dynamixel-sdk")
@@ -188,8 +188,8 @@ def scan_servos_dynamixel(port: str, baudrate: int = 1000000) -> List[int]:
     print("="*60)
 
     # Initialize PortHandler and PacketHandler
-    portHandler = PortHandler(port)
-    packetHandler = PacketHandler(2.0)  # Protocol version 2.0
+    portHandler = dynamixel_sdk.PortHandler(port)
+    packetHandler = dynamixel_sdk.PacketHandler(2.0)  # Protocol version 2.0
 
     # Open port
     if not portHandler.openPort():

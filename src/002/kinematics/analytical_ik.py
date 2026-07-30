@@ -2,7 +2,10 @@
 
 import numpy as np
 from typing import Tuple, List, Optional
-from ..utils.math_utils import normalize_angle, check_joint_limits
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from utils.math_utils import normalize_angle, check_joint_limits
 
 
 class AnalyticalIK:

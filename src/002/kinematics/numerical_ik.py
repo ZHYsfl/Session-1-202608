@@ -2,8 +2,11 @@
 
 import numpy as np
 from typing import Optional, Tuple
-from .forward_kinematics import ForwardKinematics
-from ..utils.math_utils import check_joint_limits, clamp_joint_angles
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from kinematics.forward_kinematics import ForwardKinematics
+from utils.math_utils import check_joint_limits, clamp_joint_angles
 
 
 class NumericalIK:
