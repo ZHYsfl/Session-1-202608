@@ -1,4 +1,4 @@
-# 基于 PyTorch PPO 的机器人局部避障
+# P2：基于 PyTorch PPO 的机器人局部避障
 
 本实验使用 PyTorch PPO 训练二维差速机器人。策略接收 36 路 360° 测距、相对目标状态和短时控制历史，直接输出前进速度与角速度。Pygame 只负责演示；A* 仅用于离线校准和路径效率评估，不向策略提供地图、航点或动作。
 
@@ -13,7 +13,7 @@
 - `main.py`：Pygame 实时演示。
 - `config.yaml`：全部实验参数。
 
-训练产物位于 `src/006/collision_prediction/outputs/`，该目录仅供本地使用。
+训练产物位于 `src/006/P2_collision_prediction/outputs/`，该目录仅供本地使用。
 
 ## 环境准备
 
@@ -22,7 +22,7 @@ conda activate hands_on
 ```
 
 ```bash
-python -m pip install -r src/006/collision_prediction/requirements.txt
+python -m pip install -r src/006/P2_collision_prediction/requirements.txt
 ```
 
 检查 RTX 4060 是否可用：
@@ -44,7 +44,7 @@ python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_
 正式训练前运行校准：
 
 ```bash
-python src/006/collision_prediction/calibrate_terrain.py --device cpu --episodes 1000 --num-envs 64
+python src/006/P2_collision_prediction/calibrate_terrain.py --device cpu --episodes 1000 --num-envs 64
 ```
 
 当前固定种子结果：A* 可解率 100%、几何重复率 0%、A* 路径比 1.200–1.653、DIRECT 成功率 0%、REACTIVE 成功率 37%。预览图和报告分别保存为 `outputs/terrain_preview_v2.png`、`outputs/terrain_calibration_v2.json`。
@@ -54,13 +54,13 @@ python src/006/collision_prediction/calibrate_terrain.py --device cpu --episodes
 RTX 4060 推荐直接使用配置中的 512 个并行环境和 3000 万步上限：
 
 ```bash
-python src/006/collision_prediction/train.py --model cnn --device cuda
+python src/006/P2_collision_prediction/train.py --model cnn --device cuda
 ```
 
 训练中断后续训：
 
 ```bash
-python src/006/collision_prediction/train.py --model cnn --device cuda --resume
+python src/006/P2_collision_prediction/train.py --model cnn --device cuda --resume
 ```
 
 每 10 次 PPO 更新会在 256 张固定验证地图上评估。达到阶段最低步数，并连续 3 次满足成功率不低于 85%、碰撞率不高于 10% 后才会晋级。Stage 2 必须达到成功率不低于 90%、碰撞率和超时率均不高于 5%，才会生成正式 `cnn_ppo_v2_best.pt`。
@@ -70,7 +70,7 @@ python src/006/collision_prediction/train.py --model cnn --device cuda --resume
 查看曲线：
 
 ```bash
-tensorboard --logdir src/006/collision_prediction/outputs/tensorboard_cnn_v2
+tensorboard --logdir src/006/P2_collision_prediction/outputs/tensorboard_cnn_v2
 ```
 
 终端显示 `TensorBoard ... at http://localhost:6006/` 后，在浏览器打开 `http://localhost:6006/`，进入 **Scalars** 页面。左侧勾选想看的指标；横轴选择 `STEP`，表示累计环境交互步数。曲线抖动是强化学习的正常现象，可把右上角 `Smoothing` 调到 `0.6–0.8` 观察整体趋势，但判断是否达标时仍以未经平滑的原始值为准。
@@ -133,13 +133,13 @@ tensorboard --logdir src/006/collision_prediction/outputs/tensorboard_cnn_v2
 无需模型查看 REACTIVE 基线：
 
 ```bash
-python src/006/collision_prediction/main.py --controller reactive --device cuda
+python src/006/P2_collision_prediction/main.py --controller reactive --device cuda
 ```
 
 正式训练完成后加载 CNN：
 
 ```bash
-python src/006/collision_prediction/main.py --controller cnn --device cuda
+python src/006/P2_collision_prediction/main.py --controller cnn --device cuda
 ```
 
 按 `R` 生成新任务，按 `Space` 暂停，按 `Esc` 退出。
@@ -147,13 +147,13 @@ python src/006/collision_prediction/main.py --controller cnn --device cuda
 运行 500 张从未参与训练或调参的留出测试：
 
 ```bash
-python src/006/collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500
+python src/006/P2_collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500
 ```
 
 噪声鲁棒性测试：
 
 ```bash
-python src/006/collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500 --noise
+python src/006/P2_collision_prediction/evaluate.py --controller cnn --device cuda --episodes 500 --noise
 ```
 
 最终重点查看成功率、碰撞率、超时率和成功回合路径比；累计奖励只用于训练诊断。
@@ -161,9 +161,9 @@ python src/006/collision_prediction/evaluate.py --controller cnn --device cuda -
 ## 自动测试
 
 ```bash
-python -m pytest src/006/collision_prediction/tests
+python -m pytest src/006/P2_collision_prediction/tests
 ```
 
 ```bash
-python -m ruff check src/006/collision_prediction
+python -m ruff check src/006/P2_collision_prediction
 ```
