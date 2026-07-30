@@ -1,0 +1,50 @@
+project:
+  model: models/yolo26n-seg.pt
+  data: configs/road_seg.yaml
+  output_dir: outputs
+
+train:
+  name: road_yolo26n_seg
+  epochs: 50
+  imgsz: 640
+  batch: 8
+  device: auto
+  workers: 2
+  patience: 15
+  seed: 42
+  deterministic: true
+  pretrained: true
+  optimizer: auto
+  amp: true
+  cache: false
+  plots: true
+  close_mosaic: 10
+  save_period: -1
+
+val:
+  model: outputs/train/road_yolo26n_seg/weights/best.pt
+  name: road_validation
+  split: val
+  imgsz: 640
+  batch: 8
+  device: auto
+  workers: 2
+  conf: 0.001
+  iou: 0.7
+  plots: true
+  save_json: false
+
+predict:
+  model: outputs/train/road_yolo26n_seg/weights/best.pt
+  source: datasets/road/images/test
+  name: road_prediction
+  imgsz: 640
+  conf: 0.25
+  iou: 0.7
+  device: auto
+  save: true
+  save_txt: false
+  save_conf: false
+  retina_masks: true
+  max_det: 100
+  vid_stride: 1
