@@ -68,12 +68,20 @@ class QLearningAgent:
         self.gamma = float(q_config["gamma"])
         self.rng = np.random.default_rng(seed)
 
-    def act(self, state: np.ndarray, epsilon: float = 0.0) -> int:
+    def act(
+        self,
+        state: np.ndarray,
+        epsilon: float = 0.0,
+        *,
+        deterministic: bool = False,
+    ) -> int:
         """按 Q 表最大值决策；训练时以 epsilon 概率随机探索。"""
 
-        if self.rng.random() < epsilon:
+        if epsilon > 0.0 and self.rng.random() < epsilon:
             return int(self.rng.integers(0, 2))
         values = self.q_table[self.discretizer.encode(state)]
+        if deterministic:
+            return int(np.argmax(values))
         maximum = values.max()
         candidates = np.flatnonzero(values == maximum)
         return int(self.rng.choice(candidates))

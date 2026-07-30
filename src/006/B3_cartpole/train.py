@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from collections import deque
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,8 @@ from dqn import DQNAgent, ReplayBuffer, epsilon_by_step, save_dqn
 from environment import CartPoleEnv
 from q_learning import QLearningAgent, epsilon_by_episode, save_q_table
 from torch.utils.tensorboard import SummaryWriter
+
+Policy = Callable[[np.ndarray], int]
 
 
 def parse_args() -> argparse.Namespace:
@@ -68,6 +71,27 @@ def write_metrics(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def validate_policy(
+    policy: Policy,
+    config: dict[str, Any],
+    episodes: int,
+    seed: int,
+) -> tuple[float, float]:
+    """在独立验证种子上关闭探索，返回平均步数和成功率。"""
+
+    environment = CartPoleEnv(config, seed)
+    steps: list[int] = []
+    successes = 0
+    for episode in range(episodes):
+        state = environment.reset(seed + episode)
+        terminated = truncated = False
+        while not (terminated or truncated):
+            state, _, terminated, truncated, _ = environment.step(policy(state))
+        steps.append(environment.step_count)
+        successes += int(truncated)
+    return float(np.mean(steps)), successes / episodes
+
+
 def train_dqn(
     config: dict[str, Any],
     episodes: int,
@@ -91,6 +115,13 @@ def train_dqn(
     global_step = 0
     losses: deque[float] = deque(maxlen=100)
     best_moving_steps = 0.0
+    best_validation_steps = -1.0
+    best_validation_success = 0.0
+    best_checkpoint_episode = 0
+    checkpoint_path = resolve_project_path(config["paths"]["dqn_checkpoint"])
+    validation_episodes = int(config["validation"]["episodes"])
+    validation_seed = int(config["validation"]["seed"])
+    validation_interval = int(config["validation"]["dqn_interval"])
 
     try:
         for episode in range(1, episodes + 1):
@@ -124,7 +155,8 @@ def train_dqn(
             recent_steps.append(environment.step_count)
             average_steps = moving_mean(recent_steps)
             success = bool(truncated)
-            best_moving_steps = max(best_moving_steps, average_steps)
+            if len(recent_steps) == window_size:
+                best_moving_steps = max(best_moving_steps, average_steps)
             record = {
                 "episode": episode,
                 "steps": environment.step_count,
@@ -141,6 +173,43 @@ def train_dqn(
             writer.add_scalar("episode/success", float(success), episode)
             writer.add_scalar("episode/moving_mean_steps", average_steps, episode)
             writer.add_scalar("exploration/epsilon", epsilon, episode)
+
+            if episode % validation_interval == 0 or episode == episodes:
+                validation_steps, validation_success = validate_policy(
+                    lambda value: agent.act(value, epsilon=0.0),
+                    config,
+                    validation_episodes,
+                    validation_seed,
+                )
+                record["validation_mean_steps"] = validation_steps
+                record["validation_success_rate"] = validation_success
+                writer.add_scalar("validation/mean_steps", validation_steps, episode)
+                writer.add_scalar(
+                    "validation/success_rate", validation_success, episode
+                )
+                if validation_steps > best_validation_steps:
+                    best_validation_steps = validation_steps
+                    best_validation_success = validation_success
+                    best_checkpoint_episode = episode
+                    save_dqn(
+                        checkpoint_path,
+                        agent,
+                        {
+                            "experiment_version": config["experiment"]["version"],
+                            "algorithm": "dqn",
+                            "seed": seed,
+                            "training_episode": episode,
+                            "global_step": global_step,
+                            "validation_mean_steps": validation_steps,
+                            "validation_success_rate": validation_success,
+                            "device": str(device),
+                        },
+                    )
+                print(
+                    f"  验证：平均 {validation_steps:.1f} 步 | "
+                    f"成功率 {validation_success:.0%} | "
+                    f"最佳模型回合 {best_checkpoint_episode}"
+                )
 
             if (
                 episode == 1
@@ -164,19 +233,19 @@ def train_dqn(
         "episodes": episodes,
         "global_step": global_step,
         "best_moving_mean_steps": best_moving_steps,
+        "best_validation_mean_steps": best_validation_steps,
+        "best_validation_success_rate": best_validation_success,
+        "best_checkpoint_episode": best_checkpoint_episode,
         "device": str(device),
     }
-    save_dqn(
-        resolve_project_path(config["paths"]["dqn_checkpoint"]),
-        agent,
-        metadata,
-    )
     result = {"metadata": metadata, "episodes": records}
     write_metrics(
         resolve_project_path(config["paths"]["dqn_metrics"]),
         result,
     )
-    print(f"DQN 训练完成，模型已保存；TensorBoard 日志：{log_directory}")
+    print(
+        f"DQN 训练完成，最佳模型：{checkpoint_path}；TensorBoard 日志：{log_directory}"
+    )
     return result
 
 
@@ -198,6 +267,13 @@ def train_q_learning(
     recent_steps: deque[int] = deque(maxlen=window_size)
     records: list[dict[str, float | int | bool]] = []
     best_moving_steps = 0.0
+    best_validation_steps = -1.0
+    best_validation_success = 0.0
+    best_checkpoint_episode = 0
+    checkpoint_path = resolve_project_path(config["paths"]["q_learning_checkpoint"])
+    validation_episodes = int(config["validation"]["episodes"])
+    validation_seed = int(config["validation"]["seed"])
+    validation_interval = int(config["validation"]["q_learning_interval"])
 
     try:
         for episode in range(1, episodes + 1):
@@ -220,7 +296,8 @@ def train_q_learning(
             recent_steps.append(environment.step_count)
             average_steps = moving_mean(recent_steps)
             success = bool(truncated)
-            best_moving_steps = max(best_moving_steps, average_steps)
+            if len(recent_steps) == window_size:
+                best_moving_steps = max(best_moving_steps, average_steps)
             record = {
                 "episode": episode,
                 "steps": environment.step_count,
@@ -241,6 +318,46 @@ def train_q_learning(
                 episode,
             )
             writer.add_scalar("exploration/epsilon", epsilon, episode)
+
+            if episode % validation_interval == 0 or episode == episodes:
+                validation_steps, validation_success = validate_policy(
+                    lambda value: agent.act(
+                        value,
+                        epsilon=0.0,
+                        deterministic=True,
+                    ),
+                    config,
+                    validation_episodes,
+                    validation_seed,
+                )
+                record["validation_mean_steps"] = validation_steps
+                record["validation_success_rate"] = validation_success
+                writer.add_scalar("validation/mean_steps", validation_steps, episode)
+                writer.add_scalar(
+                    "validation/success_rate", validation_success, episode
+                )
+                if validation_steps > best_validation_steps:
+                    best_validation_steps = validation_steps
+                    best_validation_success = validation_success
+                    best_checkpoint_episode = episode
+                    save_q_table(
+                        checkpoint_path,
+                        agent,
+                        {
+                            "experiment_version": config["experiment"]["version"],
+                            "algorithm": "q_learning",
+                            "seed": seed,
+                            "training_episode": episode,
+                            "validation_mean_steps": validation_steps,
+                            "validation_success_rate": validation_success,
+                            "q_table_shape": list(agent.q_table.shape),
+                        },
+                    )
+                print(
+                    f"  验证：平均 {validation_steps:.1f} 步 | "
+                    f"成功率 {validation_success:.0%} | "
+                    f"最佳模型回合 {best_checkpoint_episode}"
+                )
 
             if (
                 episode == 1
@@ -263,19 +380,20 @@ def train_q_learning(
         "seed": seed,
         "episodes": episodes,
         "best_moving_mean_steps": best_moving_steps,
+        "best_validation_mean_steps": best_validation_steps,
+        "best_validation_success_rate": best_validation_success,
+        "best_checkpoint_episode": best_checkpoint_episode,
         "q_table_shape": list(agent.q_table.shape),
     }
-    save_q_table(
-        resolve_project_path(config["paths"]["q_learning_checkpoint"]),
-        agent,
-        metadata,
-    )
     result = {"metadata": metadata, "episodes": records}
     write_metrics(
         resolve_project_path(config["paths"]["q_learning_metrics"]),
         result,
     )
-    print(f"Q-Learning 训练完成，Q 表已保存；TensorBoard 日志：{log_directory}")
+    print(
+        f"Q-Learning 训练完成，最佳 Q 表：{checkpoint_path}；"
+        f"TensorBoard 日志：{log_directory}"
+    )
     return result
 
 

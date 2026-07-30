@@ -27,3 +27,10 @@ def test_q_learning_update_changes_selected_value() -> None:
 def test_q_learning_action_is_valid() -> None:
     agent = QLearningAgent(load_config(), seed=9)
     assert agent.act(np.zeros(4, dtype=np.float32), epsilon=0.0) in (0, 1)
+
+
+def test_deterministic_policy_breaks_equal_q_values_consistently() -> None:
+    agent = QLearningAgent(load_config(), seed=9)
+    state = np.zeros(4, dtype=np.float32)
+    actions = {agent.act(state, epsilon=0.0, deterministic=True) for _ in range(10)}
+    assert actions == {0}

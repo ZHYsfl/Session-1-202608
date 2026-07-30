@@ -106,16 +106,28 @@ class DQNAgent:
         self.gamma = float(dqn_config["gamma"])
         self.batch_size = int(dqn_config["batch_size"])
         self.gradient_clip = float(dqn_config["gradient_clip"])
+        self.state_scale = torch.tensor(
+            dqn_config["state_scale"],
+            dtype=torch.float32,
+            device=device,
+        )
+        if self.state_scale.shape != (4,) or torch.any(self.state_scale <= 0):
+            raise ValueError("dqn.state_scale 必须包含 4 个正数")
         self.rng = np.random.default_rng(seed)
+
+    def normalize(self, states: torch.Tensor) -> torch.Tensor:
+        """按各状态量的典型范围缩放，避免角度等小量被网络忽略。"""
+
+        return states / self.state_scale
 
     @torch.no_grad()
     def act(self, state: np.ndarray, epsilon: float = 0.0) -> int:
         """按 epsilon-greedy 决策函数选择动作。"""
 
-        if self.rng.random() < epsilon:
+        if epsilon > 0.0 and self.rng.random() < epsilon:
             return int(self.rng.integers(0, 2))
         tensor = torch.as_tensor(state, device=self.device).unsqueeze(0)
-        return int(self.online(tensor).argmax(dim=1).item())
+        return int(self.online(self.normalize(tensor)).argmax(dim=1).item())
 
     def optimize(self, replay: ReplayBuffer) -> float | None:
         """从经验回放采样一次并最小化 TD 误差。"""
@@ -125,9 +137,19 @@ class DQNAgent:
         states, actions, rewards, next_states, dones = replay.sample(
             self.batch_size, self.device
         )
-        predicted = self.online(states).gather(1, actions[:, None]).squeeze(1)
+        normalized_states = self.normalize(states)
+        normalized_next_states = self.normalize(next_states)
+        predicted = (
+            self.online(normalized_states).gather(1, actions[:, None]).squeeze(1)
+        )
         with torch.no_grad():
-            next_values = self.target(next_states).max(dim=1).values
+            # Double DQN：在线网络选动作，目标网络估值，减轻 Q 值高估。
+            next_actions = self.online(normalized_next_states).argmax(
+                dim=1, keepdim=True
+            )
+            next_values = (
+                self.target(normalized_next_states).gather(1, next_actions).squeeze(1)
+            )
             target = rewards + self.gamma * (1.0 - dones) * next_values
         loss = nn.functional.smooth_l1_loss(predicted, target)
         self.optimizer.zero_grad(set_to_none=True)

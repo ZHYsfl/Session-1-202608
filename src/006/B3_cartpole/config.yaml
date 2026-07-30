@@ -1,5 +1,5 @@
 experiment:
-  version: b3-cartpole-v1
+  version: b3-cartpole-v2
 
 environment:
   gravity: 9.8
@@ -22,30 +22,31 @@ render:
   world_scale: 145.0
 
 dqn:
-  episodes: 600
+  episodes: 1000
   hidden_sizes: [128, 128]
+  state_scale: [2.4, 3.0, 0.20944, 3.5]
   replay_capacity: 50000
-  batch_size: 128
-  learning_rate: 0.0005
+  batch_size: 64
+  learning_rate: 0.00075
   gamma: 0.99
-  learning_starts: 1000
+  learning_starts: 500
   train_frequency: 1
-  target_update_frequency: 1000
+  target_update_frequency: 500
   epsilon_start: 1.0
   epsilon_end: 0.05
-  epsilon_decay_steps: 50000
+  epsilon_decay_steps: 12000
   gradient_clip: 10.0
 
 q_learning:
-  episodes: 5000
-  bins: [10, 12, 20, 20]
+  episodes: 4000
+  bins: [6, 6, 12, 12]
   velocity_limits: [-3.0, 3.0]
   angular_velocity_limits: [-3.5, 3.5]
-  learning_rate: 0.15
+  learning_rate: 0.2
   gamma: 0.99
   epsilon_start: 1.0
   epsilon_end: 0.03
-  epsilon_decay_episodes: 3500
+  epsilon_decay_episodes: 900
 
 training:
   seed: 42
@@ -53,13 +54,19 @@ training:
   solved_mean_steps: 475.0
   log_interval: 20
 
+validation:
+  episodes: 20
+  seed: 20000
+  dqn_interval: 50
+  q_learning_interval: 200
+
 evaluation:
   episodes: 100
   seed: 10000
 
 paths:
-  dqn_checkpoint: outputs/dqn_cartpole.pt
-  q_learning_checkpoint: outputs/q_learning_cartpole.npz
-  dqn_metrics: outputs/dqn_training_metrics.json
-  q_learning_metrics: outputs/q_learning_training_metrics.json
-  tensorboard_root: outputs/tensorboard
+  dqn_checkpoint: outputs/v2/dqn_cartpole.pt
+  q_learning_checkpoint: outputs/v2/q_learning_cartpole.npz
+  dqn_metrics: outputs/v2/dqn_training_metrics.json
+  q_learning_metrics: outputs/v2/q_learning_training_metrics.json
+  tensorboard_root: outputs/v2/tensorboard

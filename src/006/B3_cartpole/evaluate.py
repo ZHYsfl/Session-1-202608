@@ -50,7 +50,10 @@ def load_policy(
     if not path.exists():
         raise FileNotFoundError(f"找不到 Q-Learning 模型：{path}，请先训练")
     agent, metadata = load_q_table(path, config)
-    return lambda state: agent.act(state, epsilon=0.0), metadata
+    return (
+        lambda state: agent.act(state, epsilon=0.0, deterministic=True),
+        metadata,
+    )
 
 
 def evaluate_policy(

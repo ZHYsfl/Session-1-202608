@@ -28,3 +28,11 @@ def test_replay_and_single_optimization_step() -> None:
 def test_dqn_action_is_valid() -> None:
     agent = DQNAgent(load_config(), torch.device("cpu"), seed=3)
     assert agent.act(np.zeros(4, dtype=np.float32), epsilon=0.0) in (0, 1)
+
+
+def test_dqn_normalizes_each_state_dimension() -> None:
+    config = load_config()
+    agent = DQNAgent(config, torch.device("cpu"), seed=3)
+    scale = torch.tensor(config["dqn"]["state_scale"])
+    normalized = agent.normalize(scale)
+    torch.testing.assert_close(normalized, torch.ones(4))

@@ -14,7 +14,7 @@
 - 成功：杆在角度限制内、小车不越界，并坚持到 500 步。
 - 决策函数：DQN 比较神经网络输出的两个 Q 值；Q-Learning 查询离散状态对应的 Q 表，选择 Q 值较大的动作。
 
-DQN 能直接处理连续状态，但需要经验回放和目标网络稳定训练；表格 Q-Learning 更直观，但必须先把连续状态切成有限区间，精度受分箱数量限制。
+DQN 能直接处理连续状态，但需要经验回放和目标网络稳定训练；表格 Q-Learning 更直观，但必须先把连续状态切成有限区间，精度受分箱数量限制。当前 v2 会归一化 DQN 输入并使用 Double DQN；Q-Learning 使用较粗的分箱，让有限训练数据能覆盖更多 Q 表状态。
 
 ## 环境与依赖
 
@@ -32,13 +32,13 @@ python -m pip install -r src/006/B3_cartpole/requirements.txt
 
 ## 训练
 
-训练 DQN（默认 600 回合，4060 显卡会自动使用 CUDA）：
+训练 DQN（默认 1000 回合，4060 显卡会自动使用 CUDA）：
 
 ```bash
 python src/006/B3_cartpole/train.py --algorithm dqn
 ```
 
-训练表格 Q-Learning（默认 5000 回合，仅使用 CPU）：
+训练表格 Q-Learning（默认 4000 回合，仅使用 CPU）：
 
 ```bash
 python src/006/B3_cartpole/train.py --algorithm q_learning
@@ -50,12 +50,12 @@ python src/006/B3_cartpole/train.py --algorithm q_learning
 python src/006/B3_cartpole/train.py --algorithm dqn --episodes 5 --device cpu
 ```
 
-训练输出位于 `src/006/B3_cartpole/outputs/`，包含模型、逐回合 JSON 指标和 TensorBoard 日志。正式实验应固定配置和随机种子，不要用快速检查模型作为最终结果。
+训练输出位于 `src/006/B3_cartpole/outputs/v2/`，包含最佳模型、逐回合 JSON 指标和 TensorBoard 日志。训练过程每隔一段时间关闭探索，在独立验证种子上测试，并自动保留平均步数最高的模型。正式实验应固定配置和随机种子，不要用快速检查模型作为最终结果。
 
 ## 看训练曲线
 
 ```bash
-tensorboard --logdir src/006/B3_cartpole/outputs/tensorboard
+tensorboard --logdir src/006/B3_cartpole/outputs/v2/tensorboard
 ```
 
 浏览器打开终端显示的网址，重点看：
@@ -65,6 +65,8 @@ tensorboard --logdir src/006/B3_cartpole/outputs/tensorboard
 - `episode/return`：总奖励，通常随坚持步数上升。
 - `exploration/epsilon`：随机探索概率，应从高到低平滑下降。
 - `train/td_loss` 或 `mean_absolute_td_error`：预测 Q 值与 Bellman 目标的差距；会波动，不要求单调下降。
+- `validation/mean_steps`：关闭探索后的验证平均步数，用来选择最佳模型。
+- `validation/success_rate`：独立验证种子中坚持满 500 步的比例。
 
 判断训练是否有效时，优先看留出地图的成功率和平均步数，不要只看 loss。
 
@@ -81,6 +83,17 @@ python src/006/B3_cartpole/evaluate.py --algorithm q_learning
 ```
 
 `success_rate` 越接近 1 越好，`mean_steps` 越接近 500 越好。固定评估种子使两种算法可以公平比较。
+
+### v2 参考结果
+
+使用默认随机种子 `42` 训练，并在随机种子 `10000~10099` 上关闭探索评估：
+
+| 算法 | 最佳模型回合 | 平均步数 | 成功率 |
+| --- | ---: | ---: | ---: |
+| DQN v2 | 100 | 499.88 | 99% |
+| Q-Learning v2 | 1000 | 369.51 | 27% |
+
+旧版 DQN 和 Q-Learning 的对应结果分别为 `164.78 / 0%` 与 `336.57 / 16%`。DQN 后续训练可能出现暂时退化，因此程序保存的是独立验证集上表现最好的 checkpoint，而不是最后一个回合的网络。
 
 ## Pygame 可视化
 
