@@ -105,6 +105,48 @@ python src/006/B3_cartpole/main.py --algorithm dqn
 
 也可选择 `q_learning`、`random` 或 `manual`。手动模式用左右方向键施力；所有模式均支持 `R` 重置、空格暂停、`Esc` 退出。窗口右侧实时显示状态空间、动作、回报和成功/失败。
 
+## 正式实验流水线
+
+`formal_experiments.yaml` 固定了论文实验协议：4组 DQN 消融、3组 Q-Learning 分箱、3个训练种子、每个模型70,000个环境步。正式流水线与前面的单模型教学命令相互独立。
+
+查看完整矩阵（要训练哪些算法版本、每个版本使用哪些随机种子，以及每次训练运行多少环境交互步）：
+
+```bash
+python src/006/B3_cartpole/formal_runner.py list
+```
+
+训练全部21个学习模型：
+
+```bash
+python src/006/B3_cartpole/formal_runner.py train
+```
+
+训练中断后重新执行同一命令即可。已经完成且配置哈希、步数均匹配的任务会显示 `SKIP completed`；正在运行时被中断的单个任务会从头重跑，不会伪装成完整结果。
+
+全部训练结束后运行开发评估：
+
+```bash
+python src/006/B3_cartpole/formal_runner.py evaluate --split development
+```
+
+生成逐种子 CSV、跨种子汇总 CSV、方法对比图、best/final 差异图和样本效率曲线：
+
+```bash
+python src/006/B3_cartpole/formal_runner.py report --split development
+```
+
+开发结果位于 `outputs/formal/reports/development/`。确认算法、超参数和图表都不再修改后，才允许一次性解封正式测试：
+
+```bash
+python src/006/B3_cartpole/formal_runner.py evaluate --split final --confirm-final-test
+```
+
+```bash
+python src/006/B3_cartpole/formal_runner.py report --split final
+```
+
+正式测试不允许筛选部分算法或种子，并会先检查全部21个训练结果。开发评估使用 `10000~10099`，验证使用 `20000~20019`，封存正式测试使用 `30000~30099`。模型、日志和原始结果仍在 Git 忽略的 `outputs/` 中；确认后的表格和图片再放入 `paper/006/B3_cartpole/`。
+
 ## 测试与代码检查
 
 ```bash

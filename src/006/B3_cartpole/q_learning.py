@@ -116,6 +116,16 @@ def epsilon_by_episode(config: dict[str, Any], episode: int) -> float:
     return end + (start - end) * math.exp(-episode / decay)
 
 
+def epsilon_by_step(config: dict[str, Any], global_step: int) -> float:
+    """正式实验按交互步数指数降低 Q-Learning 探索率。"""
+
+    q_config = config["q_learning"]
+    start = float(q_config["epsilon_start"])
+    end = float(q_config["epsilon_end"])
+    decay = float(q_config["epsilon_decay_steps"])
+    return end + (start - end) * math.exp(-global_step / decay)
+
+
 def save_q_table(
     path: Path,
     agent: QLearningAgent,

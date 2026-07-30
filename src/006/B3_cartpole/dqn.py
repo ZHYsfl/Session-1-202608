@@ -106,6 +106,8 @@ class DQNAgent:
         self.gamma = float(dqn_config["gamma"])
         self.batch_size = int(dqn_config["batch_size"])
         self.gradient_clip = float(dqn_config["gradient_clip"])
+        self.normalize_state = bool(dqn_config.get("normalize_state", True))
+        self.double_dqn = bool(dqn_config.get("double_dqn", True))
         self.state_scale = torch.tensor(
             dqn_config["state_scale"],
             dtype=torch.float32,
@@ -118,7 +120,7 @@ class DQNAgent:
     def normalize(self, states: torch.Tensor) -> torch.Tensor:
         """按各状态量的典型范围缩放，避免角度等小量被网络忽略。"""
 
-        return states / self.state_scale
+        return states / self.state_scale if self.normalize_state else states
 
     @torch.no_grad()
     def act(self, state: np.ndarray, epsilon: float = 0.0) -> int:
@@ -143,13 +145,19 @@ class DQNAgent:
             self.online(normalized_states).gather(1, actions[:, None]).squeeze(1)
         )
         with torch.no_grad():
-            # Double DQN：在线网络选动作，目标网络估值，减轻 Q 值高估。
-            next_actions = self.online(normalized_next_states).argmax(
-                dim=1, keepdim=True
-            )
-            next_values = (
-                self.target(normalized_next_states).gather(1, next_actions).squeeze(1)
-            )
+            if self.double_dqn:
+                # Double DQN：在线网络选动作，目标网络估值，减轻 Q 值高估。
+                next_actions = self.online(normalized_next_states).argmax(
+                    dim=1, keepdim=True
+                )
+                next_values = (
+                    self.target(normalized_next_states)
+                    .gather(1, next_actions)
+                    .squeeze(1)
+                )
+            else:
+                # Standard DQN：直接用目标网络中的最大 Q 值。
+                next_values = self.target(normalized_next_states).max(dim=1).values
             target = rewards + self.gamma * (1.0 - dones) * next_values
         loss = nn.functional.smooth_l1_loss(predicted, target)
         self.optimizer.zero_grad(set_to_none=True)

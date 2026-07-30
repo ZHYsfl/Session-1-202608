@@ -1,0 +1,50 @@
+protocol:
+  environment_steps: 70000
+  validation_interval_steps: 5000
+  training_seeds: [42, 123, 2026]
+  validation:
+    episodes: 20
+    seed: 20000
+  development:
+    episodes: 100
+    seed: 10000
+  final:
+    episodes: 100
+    seed: 30000
+
+dqn_variants:
+  dqn_standard:
+    label: Standard DQN
+    normalize_state: false
+    double_dqn: false
+    epsilon_decay_steps: 50000
+  dqn_normalized:
+    label: + State normalization
+    normalize_state: true
+    double_dqn: false
+    epsilon_decay_steps: 50000
+  double_dqn:
+    label: + Double DQN
+    normalize_state: true
+    double_dqn: true
+    epsilon_decay_steps: 50000
+  double_dqn_fast_exploration:
+    label: Full method
+    normalize_state: true
+    double_dqn: true
+    epsilon_decay_steps: 12000
+
+q_learning_variants:
+  q_coarse:
+    label: Q-Learning Coarse
+    bins: [4, 4, 8, 8]
+  q_medium:
+    label: Q-Learning Medium
+    bins: [6, 6, 12, 12]
+  q_fine:
+    label: Q-Learning Fine
+    bins: [10, 12, 20, 20]
+
+baselines:
+  random:
+    label: Random policy
