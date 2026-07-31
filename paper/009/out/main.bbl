@@ -1,0 +1,30 @@
+\begin{thebibliography}{1}
+
+\bibitem{jocher2023yolov8}
+Glenn Jocher, Jing Qiu, and Ayush Chaurasia.
+\newblock Yolo by ultralytics.
+\newblock {\em GitHub Repository}, 2023.
+\newblock https://github.com/ultralytics/ultralytics.
+
+\bibitem{redmon2016yolo}
+Joseph Redmon and Ali Farhadi.
+\newblock You only look once: Unified, real-time object detection.
+\newblock In {\em Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition}, pages 779--788, 2016.
+
+\bibitem{wang2024yolov10}
+Ao~Wang, Hongyu Chen, Linghao Liu, and Hao Chen.
+\newblock Yolov10: Real-time end-to-end object detection.
+\newblock {\em arXiv preprint arXiv:2405.14458}, 2024.
+
+\bibitem{wu2022vehicle}
+Hao Wu and Wei Zhao.
+\newblock Vehicle monocular ranging based on improved yolo detection.
+\newblock {\em IEEE Access}, 10:92145--92154, 2022.
+
+\bibitem{zhang2021review}
+Li~Zhang and Ming Li.
+\newblock A review of monocular vision distance measurement methods.
+\newblock {\em Journal of Physics: Conference Series}, 1885(4):042067, 2021.
+
+\end{thebibliography}
