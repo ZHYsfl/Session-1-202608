@@ -166,3 +166,4 @@ src/002/models/checkpoint_epoch_*.pth
 src/002/*_backup_*.zip
 src/002/*.log
 src/002/data/ik_dataset.h5
+backup_*.zip
