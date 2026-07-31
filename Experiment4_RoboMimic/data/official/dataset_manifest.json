@@ -1,0 +1,51 @@
+{
+  "source": {
+    "repository": "robomimic/robomimic_datasets",
+    "repository_type": "Hugging Face dataset",
+    "version": "v1.5",
+    "demonstration_type": "proficient human",
+    "modality": "low_dim"
+  },
+  "datasets": {
+    "lift": {
+      "environment": "Lift",
+      "file": "lift_ph_low_dim_v15.hdf5",
+      "bytes": 21084088,
+      "sha256": "2067777cb8b532e9263dd09fd6448c41cc31224bb27be4a3b734010ae13eb540",
+      "trajectories": 200,
+      "samples": 9666,
+      "observation_dim": 19,
+      "action_dim": 7
+    },
+    "can": {
+      "environment": "PickPlaceCan",
+      "file": "can_ph_low_dim_v15.hdf5",
+      "bytes": 46889752,
+      "sha256": "3f2eb92e0a5025d0095e866ac16cc8092d6a762abe27dec90dbaff9027282962",
+      "trajectories": 200,
+      "samples": 23207,
+      "observation_dim": 23,
+      "action_dim": 7
+    },
+    "square": {
+      "environment": "NutAssemblySquare",
+      "file": "square_ph_low_dim_v15.hdf5",
+      "bytes": 51145256,
+      "sha256": "45d8cabb6d57a4c03e839aa5e4b3e58fb60fe8bd20e1951fec563a2abfd14951",
+      "trajectories": 200,
+      "samples": 30154,
+      "observation_dim": 23,
+      "action_dim": 7
+    },
+    "transport": {
+      "environment": "TwoArmTransport",
+      "file": "transport_ph_low_dim_v15.hdf5",
+      "bytes": 303187328,
+      "sha256": "260515618f4c8b660e54171497ecceb08c7c6463691a9ce862b158bcacd950b4",
+      "trajectories": 200,
+      "samples": 93752,
+      "observation_dim": 59,
+      "action_dim": 14
+    }
+  }
+}
