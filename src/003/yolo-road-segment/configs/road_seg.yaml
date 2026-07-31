@@ -1,0 +1,9 @@
+# Ultralytics segmentation dataset configuration.
+# Paths are relative to the project root when commands are run from the root.
+path: datasets/road
+train: images/train
+val: images/val
+test: images/test
+
+names:
+  0: road

@@ -1,0 +1,48 @@
+This is BibTeX, Version 0.99d (TeX Live 2025)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: main.aux
+The style file: plain.bst
+Database file #1: references.bib
+Warning--empty publisher in Paszke2019PyTorch
+You've used 10 entries,
+            2118 wiz_defined-function locations,
+            557 strings with 6547 characters,
+and the built_in function-call counts, 3767 in all, are:
+= -- 309
+> -- 309
+< -- 0
++ -- 122
+- -- 112
+* -- 279
+:= -- 676
+add.period$ -- 33
+call.type$ -- 10
+change.case$ -- 86
+chr.to.int$ -- 0
+cite$ -- 11
+duplicate$ -- 119
+empty$ -- 247
+format.name$ -- 112
+if$ -- 743
+int.to.chr$ -- 0
+int.to.str$ -- 10
+missing$ -- 8
+newline$ -- 55
+num.names$ -- 20
+pop$ -- 119
+preamble$ -- 1
+purify$ -- 76
+quote$ -- 0
+skip$ -- 66
+stack$ -- 0
+substring$ -- 50
+swap$ -- 15
+text.length$ -- 0
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 40
+warning$ -- 1
+while$ -- 20
+width$ -- 12
+write$ -- 106
+(There was 1 warning)

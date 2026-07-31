@@ -1,0 +1,92 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{Long2015FCN}
+\citation{Ronneberger2015UNet}
+\citation{Redmon2018YOLOv3}
+\citation{Bochkovskiy2020YOLOv4}
+\citation{Jocher2023Ultralytics}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\newlabel{sec:intro}{{1}{1}{Introduction}{section.1}{}}
+\newlabel{sec:intro@cref}{{[section][1][]1}{[1][1][]1}{}{}{}}
+\citation{Yu2020BDD100K}
+\citation{Bochkovskiy2020YOLOv4}
+\citation{Jocher2023Ultralytics}
+\citation{He2017MaskRCNN}
+\citation{Lin2014COCO}
+\citation{Jocher2023Ultralytics}
+\@writefile{toc}{\contentsline {section}{\numberline {2}Background}{2}{section.2}\protected@file@percent }
+\newlabel{sec:background}{{2}{2}{Background}{section.2}{}}
+\newlabel{sec:background@cref}{{[section][2][]2}{[1][2][]2}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Road segmentation in autonomous driving}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}YOLO-family instance segmentation}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Transfer learning and backbone freezing}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Evaluation metrics}{3}{subsection.2.4}\protected@file@percent }
+\newlabel{sec:metrics}{{2.4}{3}{Evaluation metrics}{subsection.2.4}{}}
+\newlabel{sec:metrics@cref}{{[subsection][4][2]2.4}{[1][2][]3}{}{}{}}
+\newlabel{eq:iou}{{1}{3}{Evaluation metrics}{equation.1}{}}
+\newlabel{eq:iou@cref}{{[equation][1][]1}{[1][2][]3}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Method}{3}{section.3}\protected@file@percent }
+\newlabel{sec:method}{{3}{3}{Method}{section.3}{}}
+\newlabel{sec:method@cref}{{[section][3][]3}{[1][3][]3}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Pipeline overview}{3}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Dataset construction}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{eq:area}{{2}{4}{Dataset construction}{equation.2}{}}
+\newlabel{eq:area@cref}{{[equation][2][]2}{[1][3][]4}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Model and training strategy}{4}{subsection.3.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Main training configuration.}}{4}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:train_cfg}{{1}{4}{Main training configuration}{table.caption.1}{}}
+\newlabel{tab:train_cfg@cref}{{[table][1][]1}{[1][4][]4}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}Validation, inference, and export}{4}{subsection.3.4}\protected@file@percent }
+\citation{Astral2024uv}
+\citation{Paszke2019PyTorch}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Reproducibility engineering}{5}{subsection.3.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experiments}{5}{section.4}\protected@file@percent }
+\newlabel{sec:experiments}{{4}{5}{Experiments}{section.4}{}}
+\newlabel{sec:experiments@cref}{{[section][4][]4}{[1][5][]5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Implementation details}{5}{subsection.4.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Smoke test on COCO8-Seg}{5}{subsection.4.2}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces COCO8-Seg smoke-test results after 3 epochs.}}{5}{table.caption.2}\protected@file@percent }
+\newlabel{tab:smoke}{{2}{5}{COCO8-Seg smoke-test results after 3 epochs}{table.caption.2}{}}
+\newlabel{tab:smoke@cref}{{[table][2][]2}{[1][5][]5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Custom road dataset}{5}{subsection.4.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Main training and validation results}{5}{subsection.4.4}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Road dataset split and quality-check summary.}}{6}{table.caption.3}\protected@file@percent }
+\newlabel{tab:dataset}{{3}{6}{Road dataset split and quality-check summary}{table.caption.3}{}}
+\newlabel{tab:dataset@cref}{{[table][3][]3}{[1][5][]6}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Validation metrics for the best frozen-backbone model (run \texttt  {road\_yolo26n\_seg\_20260731\_115121}).}}{6}{table.caption.4}\protected@file@percent }
+\newlabel{tab:main}{{4}{6}{Validation metrics for the best frozen-backbone model (run \tool {road\_yolo26n\_seg\_20260731\_115121})}{table.caption.4}{}}
+\newlabel{tab:main@cref}{{[table][4][]4}{[1][6][]6}{}{}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Training curves for the main frozen-backbone run: training losses decrease smoothly and validation mAP converges to high values.}}{6}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:results}{{1}{6}{Training curves for the main frozen-backbone run: training losses decrease smoothly and validation mAP converges to high values}{figure.caption.5}{}}
+\newlabel{fig:results@cref}{{[figure][1][]1}{[1][6][]6}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Ablation study: frozen versus unfrozen backbone}{6}{subsection.4.5}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Qualitative validation results for a batch of road images.}}{7}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:qualitative}{{2}{7}{Qualitative validation results for a batch of road images}{figure.caption.6}{}}
+\newlabel{fig:qualitative@cref}{{[figure][2][]2}{[1][6][]7}{}{}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {5}{\ignorespaces Backbone-freezing ablation. Each value is the COCO-style validation metric of the best checkpoint.}}{7}{table.caption.7}\protected@file@percent }
+\newlabel{tab:ablation}{{5}{7}{Backbone-freezing ablation. Each value is the COCO-style validation metric of the best checkpoint}{table.caption.7}{}}
+\newlabel{tab:ablation@cref}{{[table][5][]5}{[1][6][]7}{}{}{}}
+\bibstyle{plain}
+\bibdata{references}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Inference resolution and speed}{8}{subsection.4.6}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {6}{\ignorespaces Per-image latency breakdown on the validation set at 640$\times $640 (batch size 8).}}{8}{table.caption.8}\protected@file@percent }
+\newlabel{tab:speed}{{6}{8}{Per-image latency breakdown on the validation set at 640$\times $640 (batch size 8)}{table.caption.8}{}}
+\newlabel{tab:speed@cref}{{[table][6][]6}{[1][8][]8}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7}Test-set inference and ONNX export}{8}{subsection.4.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{8}{section.5}\protected@file@percent }
+\newlabel{sec:conclusion}{{5}{8}{Conclusion}{section.5}{}}
+\newlabel{sec:conclusion@cref}{{[section][5][]5}{[1][8][]8}{}{}{}}
+\bibcite{Astral2024uv}{1}
+\bibcite{Bochkovskiy2020YOLOv4}{2}
+\bibcite{He2017MaskRCNN}{3}
+\bibcite{Jocher2023Ultralytics}{4}
+\bibcite{Lin2014COCO}{5}
+\bibcite{Long2015FCN}{6}
+\bibcite{Paszke2019PyTorch}{7}
+\bibcite{Redmon2018YOLOv3}{8}
+\bibcite{Ronneberger2015UNet}{9}
+\bibcite{Yu2020BDD100K}{10}
+\gdef \@abspage@last{9}
