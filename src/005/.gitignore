@@ -159,6 +159,9 @@ cython_debug/
 node_modules/
 dist/
 
+
+
+.claude/
 # LaTeX intermediate files (keep final paper PDFs and figure assets)
 paper/**/build/
 paper/**/*.aux
