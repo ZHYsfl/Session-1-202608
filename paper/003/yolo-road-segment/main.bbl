@@ -1,0 +1,70 @@
+\begin{thebibliography}{10}
+
+\bibitem{Astral2024uv}
+{Astral Software Inc.}
+\newblock uv: An extremely fast python package and project manager, written in
+  rust.
+\newblock \url{https://github.com/astral-sh/uv}, 2024.
+\newblock Accessed: 2026-07-31.
+
+\bibitem{Bochkovskiy2020YOLOv4}
+Alexey Bochkovskiy, Chien-Yao Wang, and Hong-Yuan~Mark Liao.
+\newblock {YOLOv4}: Optimal speed and accuracy of object detection.
+\newblock {\em arXiv preprint arXiv:2004.10934}, 2020.
+
+\bibitem{He2017MaskRCNN}
+Kaiming He, Georgia Gkioxari, Piotr Doll{\'a}r, and Ross Girshick.
+\newblock Mask {R-CNN}.
+\newblock In {\em Proceedings of the IEEE International Conference on Computer
+  Vision (ICCV)}, 2017.
+
+\bibitem{Jocher2023Ultralytics}
+Glenn Jocher, Ayush Chaurasia, and Jing Qiu.
+\newblock Ultralytics yolov8.
+\newblock \url{https://github.com/ultralytics/ultralytics}, 2023.
+\newblock Accessed: 2026-07-31; version 8.4.112.
+
+\bibitem{Lin2014COCO}
+Tsung-Yi Lin, Michael Maire, Serge Belongie, Jo~Hays, Pietro Perona, Deva
+  Ramanan, Piotr Doll{\'a}r, and C.~Lawrence Zitnick.
+\newblock Microsoft {COCO}: Common objects in context.
+\newblock In {\em Proceedings of the European Conference on Computer Vision
+  (ECCV)}, 2014.
+
+\bibitem{Long2015FCN}
+Jonathan Long, Evan Shelhamer, and Trevor Darrell.
+\newblock Fully convolutional networks for semantic segmentation.
+\newblock In {\em Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, 2015.
+
+\bibitem{Paszke2019PyTorch}
+Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer, James Bradbury, Gregory
+  Chanan, Trevor Killeen, Zeming Lin, Natalia Gimelshein, Luca Antiga, Alban
+  Desmaison, Andreas Kopf, Edward Yang, Zachary DeVito, Martin Raison, Alykhan
+  Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu~Fang, Junjie Bai, and Soumith
+  Chintala.
+\newblock {PyTorch}: An imperative style, high-performance deep learning
+  library.
+\newblock In {\em Advances in Neural Information Processing Systems (NeurIPS)}.
+  2019.
+
+\bibitem{Redmon2018YOLOv3}
+Joseph Redmon and Ali Farhadi.
+\newblock {YOLOv3}: An incremental improvement.
+\newblock {\em arXiv preprint arXiv:1804.02767}, 2018.
+
+\bibitem{Ronneberger2015UNet}
+Olaf Ronneberger, Philipp Fischer, and Thomas Brox.
+\newblock {U-Net}: Convolutional networks for biomedical image segmentation.
+\newblock In {\em Proceedings of the International Conference on Medical Image
+  Computing and Computer-Assisted Intervention (MICCAI)}, 2015.
+
+\bibitem{Yu2020BDD100K}
+Fisher Yu, Haofeng Chen, Xin Wang, Wenqi Xian, Yingying Chen, Fangchen Liu,
+  Vashisht Madhavan, and Trevor Darrell.
+\newblock {BDD100K}: A diverse driving dataset for heterogeneous multitask
+  learning.
+\newblock In {\em Proceedings of the IEEE/CVF Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, 2020.
+
+\end{thebibliography}

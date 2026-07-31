@@ -1,0 +1,70 @@
+{
+  "results": [
+    {
+      "point": 1,
+      "open_mm": 34.2,
+      "closed_mm": 2.0,
+      "iters": 4,
+      "pos_err_seq": [
+        34.2,
+        12.7,
+        6.7,
+        2.0
+      ]
+    },
+    {
+      "point": 2,
+      "open_mm": 29.7,
+      "closed_mm": 1.0,
+      "iters": 5,
+      "pos_err_seq": [
+        29.7,
+        8.0,
+        6.0,
+        5.0,
+        1.0
+      ]
+    },
+    {
+      "point": 3,
+      "open_mm": 18.6,
+      "closed_mm": 5.2,
+      "iters": 5,
+      "pos_err_seq": [
+        18.6,
+        16.2,
+        14.1,
+        7.2,
+        5.2
+      ]
+    },
+    {
+      "point": 4,
+      "open_mm": 34.3,
+      "closed_mm": 9.9,
+      "iters": 5,
+      "pos_err_seq": [
+        34.3,
+        17.7,
+        17.6,
+        16.1,
+        9.9
+      ]
+    },
+    {
+      "point": 5,
+      "open_mm": 51.0,
+      "closed_mm": 1.7,
+      "iters": 5,
+      "pos_err_seq": [
+        51.0,
+        5.8,
+        5.8,
+        3.8,
+        1.7
+      ]
+    }
+  ],
+  "open_mean": 33.56,
+  "closed_mean": 3.96
+}

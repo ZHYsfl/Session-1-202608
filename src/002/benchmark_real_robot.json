@@ -1,0 +1,107 @@
+{
+  "summary": {
+    "numerical": {
+      "sw": "0.9/0.9/1.0",
+      "open": "35.6/34.0/51.6",
+      "closed": "-",
+      "sw_mean": 0.8996687849750563,
+      "open_mean": 35.586854076969615,
+      "closed_mean": null
+    },
+    "neural": {
+      "sw": "15.2/11.0/23.3",
+      "open": "35.9/40.0/43.4",
+      "closed": "-",
+      "sw_mean": 15.152977148603918,
+      "open_mean": 35.93695376968767,
+      "closed_mean": null
+    },
+    "hybrid": {
+      "sw": "5.1/0.9/22.0",
+      "open": "36.0/33.4/54.1",
+      "closed": "34.0/33.4/52.1",
+      "sw_mean": 5.086032240723997,
+      "open_mean": 36.044744997435785,
+      "closed_mean": 34.04383367210893
+    }
+  },
+  "per_point": [
+    {
+      "point": 1,
+      "target_mm": [
+        372.3,
+        43.6,
+        245.5
+      ],
+      "numerical_sw": 0.87,
+      "neural_sw": 22.01,
+      "hybrid_sw": 22.01,
+      "numerical_open": 43.3,
+      "neural_open": 43.4,
+      "hybrid_open": 45.1,
+      "hybrid_closed": 41.9
+    },
+    {
+      "point": 2,
+      "target_mm": [
+        300.7,
+        -211.4,
+        195.7
+      ],
+      "numerical_sw": 0.82,
+      "neural_sw": 23.32,
+      "hybrid_sw": 0.84,
+      "numerical_open": 31.3,
+      "neural_open": "skip(unsafe)",
+      "hybrid_open": 29.9,
+      "hybrid_closed": 25.9
+    },
+    {
+      "point": 3,
+      "target_mm": [
+        396.1,
+        -77.1,
+        192.6
+      ],
+      "numerical_sw": 0.81,
+      "neural_sw": 9.8,
+      "hybrid_sw": 0.78,
+      "numerical_open": 17.7,
+      "neural_open": 20.4,
+      "hybrid_open": 17.7,
+      "hybrid_closed": 16.9
+    },
+    {
+      "point": 4,
+      "target_mm": [
+        366.7,
+        204.4,
+        233.6
+      ],
+      "numerical_sw": 0.99,
+      "neural_sw": 9.64,
+      "hybrid_sw": 0.9,
+      "numerical_open": 34.0,
+      "neural_open": 39.4,
+      "hybrid_open": 33.4,
+      "hybrid_closed": 33.4
+    },
+    {
+      "point": 5,
+      "target_mm": [
+        349.0,
+        -124.8,
+        313.7
+      ],
+      "numerical_sw": 1.0,
+      "neural_sw": 10.99,
+      "hybrid_sw": 0.91,
+      "numerical_open": 51.6,
+      "neural_open": 40.6,
+      "hybrid_open": 54.1,
+      "hybrid_closed": 52.1
+    }
+  ],
+  "note": "关节角=真机实测,末端位置=FK计算",
+  "timestamp": "2026-07-31 08:12:15"
+}
