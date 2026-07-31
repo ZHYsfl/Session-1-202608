@@ -185,6 +185,16 @@ python -m src.predict --no-timestamp --source test_images
 
 长期实验参数应修改 `configs/pipeline.yaml`，保证实验配置能够提交和复现。
 
+### 冻结微调
+
+默认使用冻结微调策略：`configs/pipeline.yaml` 中 `train.freeze: 10` 会冻结模型的前 10 层（通常为 backbone），只训练 neck 和 head 部分。如需改为全量调整，可将该值设为 `0` 或直接删除该配置项。
+
+临时覆盖冻结层数：
+
+```bash
+python -m src.train --freeze 15
+```
+
 ## 7. 主要输出
 
 每次运行都会生成带时间戳的独立目录，例如：

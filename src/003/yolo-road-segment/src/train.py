@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plots", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--exist-ok", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--timestamp", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--freeze", type=int, default=None)
     parser.add_argument("--verbose", action="store_true")
     return parser
 
@@ -75,6 +76,7 @@ def train(args: argparse.Namespace) -> Path:
         "deterministic": args.deterministic,
         "plots": args.plots,
         "exist_ok": args.exist_ok,
+        "freeze": args.freeze,
     }
     # 合并参数
     options: dict[str, Any] = merge_not_none(train_cfg, overrides)
