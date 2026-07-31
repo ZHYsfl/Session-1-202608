@@ -181,6 +181,7 @@ paper/**/main.tex.orig
 
 # 老师提供的教学资料(含超100MB大文件),不纳入版本控制
 teacher/
+.claude/
 # LaTeX intermediate files (keep final paper PDFs and figure assets)
 paper/**/build/
 paper/**/*.aux
