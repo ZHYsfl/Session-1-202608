@@ -181,3 +181,21 @@ paper/**/main.tex.orig
 
 # 老师提供的教学资料(含超100MB大文件),不纳入版本控制
 teacher/
+# LaTeX intermediate files (keep final paper PDFs and figure assets)
+paper/**/build/
+paper/**/*.aux
+paper/**/*.bbl
+paper/**/*.bcf
+paper/**/*.blg
+paper/**/*.fdb_latexmk
+paper/**/*.fls
+paper/**/*.lof
+paper/**/*.lot
+paper/**/*.nav
+paper/**/*.out
+paper/**/*.run.xml
+paper/**/*.snm
+paper/**/*.synctex.gz
+paper/**/*.toc
+paper/**/*.vrb
+paper/**/*.xdv
