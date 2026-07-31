@@ -163,3 +163,5 @@ dist/
 .idea/
 output_video.mp4
 result_img.jpg
+
+.claude/
