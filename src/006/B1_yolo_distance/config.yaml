@@ -1,0 +1,38 @@
+model:
+  weights: yolov10n.pt
+  confidence: 0.40
+  image_size: 640
+  device: null
+
+video:
+  source: 0
+  display: true
+  save_path: null
+
+camera:
+  # 完成标定后填写。按检测框宽度测距的目标使用 fx_px，
+  # 按检测框高度测距的目标（如 person）使用 fy_px。
+  fx_px: null
+  fy_px: null
+
+objects:
+  # real_size_m 是目标的参考真实尺寸；dimension 指定使用框宽还是框高。
+  # 下列数值仅用于初期验证，正式实验应替换为实测值。
+  person:
+    real_size_m: 1.70
+    dimension: height
+  car:
+    real_size_m: 1.80
+    dimension: width
+  bus:
+    real_size_m: 2.50
+    dimension: width
+  truck:
+    real_size_m: 2.50
+    dimension: width
+
+warning:
+  distance_m: 5.0
+
+smoothing:
+  alpha: 0.35

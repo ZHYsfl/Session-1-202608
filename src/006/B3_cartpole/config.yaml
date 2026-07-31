@@ -1,0 +1,77 @@
+experiment:
+  version: b3-cartpole-v2
+
+environment:
+  gravity: 9.8
+  cart_mass: 1.0
+  pole_mass: 0.1
+  half_pole_length: 0.5
+  force_magnitude: 10.0
+  time_step: 0.02
+  position_threshold: 2.4
+  angle_threshold_degrees: 12.0
+  max_steps: 500
+  alive_reward: 1.0
+  failure_penalty: -10.0
+  success_bonus: 10.0
+
+render:
+  width: 900
+  height: 600
+  fps: 60
+  world_scale: 145.0
+
+dqn:
+  episodes: 1000
+  hidden_sizes: [128, 128]
+  state_scale: [2.4, 3.0, 0.20944, 3.5]
+  normalize_state: true
+  double_dqn: true
+  replay_capacity: 50000
+  batch_size: 64
+  learning_rate: 0.00075
+  gamma: 0.99
+  learning_starts: 500
+  train_frequency: 1
+  target_update_frequency: 500
+  epsilon_start: 1.0
+  epsilon_end: 0.05
+  epsilon_decay_steps: 12000
+  gradient_clip: 10.0
+
+q_learning:
+  episodes: 4000
+  bins: [6, 6, 12, 12]
+  velocity_limits: [-3.0, 3.0]
+  angular_velocity_limits: [-3.5, 3.5]
+  learning_rate: 0.2
+  gamma: 0.99
+  epsilon_start: 1.0
+  epsilon_end: 0.03
+  epsilon_decay_episodes: 900
+  epsilon_decay_steps: 15000
+
+training:
+  seed: 42
+  moving_average_window: 100
+  solved_mean_steps: 475.0
+  log_interval: 20
+
+validation:
+  episodes: 20
+  seed: 20000
+  dqn_interval: 50
+  q_learning_interval: 200
+
+evaluation:
+  episodes: 100
+  seed: 10000
+
+paths:
+  dqn_checkpoint: outputs/v2/dqn_cartpole.pt
+  dqn_final_checkpoint: outputs/v2/dqn_cartpole_final.pt
+  q_learning_checkpoint: outputs/v2/q_learning_cartpole.npz
+  q_learning_final_checkpoint: outputs/v2/q_learning_cartpole_final.npz
+  dqn_metrics: outputs/v2/dqn_training_metrics.json
+  q_learning_metrics: outputs/v2/q_learning_training_metrics.json
+  tensorboard_root: outputs/v2/tensorboard

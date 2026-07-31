@@ -1,0 +1,136 @@
+# SO-101 Robot Configuration
+
+# Robot parameters (approximate - will be refined from URDF)
+robot:
+  name: "SO-101"
+  dof: 5  # excluding gripper
+
+  # Link lengths (meters) - approximate, will use URDF values
+  link_lengths:
+    shoulder_height: 0.08  # h
+    radial_offset: 0.02    # d0
+    upper_arm: 0.15        # L1 (shoulder to elbow)
+    forearm: 0.15          # L2 (elbow to wrist)
+    wrist_to_tcp: 0.10     # L3 (wrist to tool center point)
+
+  # Joint limits (radians)
+  joint_limits:
+    shoulder_pan: [-3.14, 3.14]
+    shoulder_lift: [-1.57, 1.57]
+    elbow_flex: [-2.35, 2.35]
+    wrist_flex: [-1.57, 1.57]
+    wrist_roll: [-3.14, 3.14]
+
+  # Soft limits for safe operation (radians)
+  soft_joint_limits:
+    shoulder_pan: [-3.0, 3.0]
+    shoulder_lift: [-1.4, 1.4]
+    elbow_flex: [-2.2, 2.2]
+    wrist_flex: [-1.4, 1.4]
+    wrist_roll: [-3.0, 3.0]
+
+# Inverse kinematics settings
+ik:
+  analytical:
+    use_elbow_up: true  # prefer elbow-up solution
+    position_tolerance: 0.001  # meters
+    orientation_tolerance: 0.017  # radians (~1 degree)
+
+  numerical:
+    method: "damped_least_squares"
+    max_iterations: 50
+    damping_min: 0.001
+    damping_max: 0.1
+    position_tolerance: 0.001
+    orientation_tolerance: 0.01
+    max_joint_step: 0.1  # radians per iteration
+
+  neural:
+    model_path: "models/ik_mlp_best.pth"
+    use_current_joint_input: true
+
+  hybrid:
+    use_nn_warmstart: true
+    numerical_refinement_steps: 3
+
+# Neural network training
+training:
+  model:
+    input_dim: 12  # [x, y, z, sin(α), cos(α), sin(ψ), cos(ψ), q1-q5]
+    hidden_dims: [256, 256, 128]
+    output_dim: 5
+    activation: "relu"
+    use_batch_norm: true
+    dropout: 0.1
+
+  dataset:
+    num_samples: 150000
+    train_ratio: 0.7
+    val_ratio: 0.15
+    test_ratio: 0.15
+    augmentation:
+      current_joint_noise: 0.05  # radians
+      position_noise: 0.001  # meters
+
+  hyperparameters:
+    batch_size: 256
+    learning_rate: 0.001
+    epochs: 200
+    optimizer: "adam"
+    scheduler: "reduce_on_plateau"
+    early_stopping_patience: 20
+
+  loss:
+    joint_weight: 1.0
+    position_weight: 10.0
+    orientation_weight: 5.0
+    joint_limit_margin_weight: 0.1
+
+# Simulation
+simulation:
+  mujoco:
+    timestep: 0.002
+    visualization: true
+
+  trajectory:
+    interpolation_points: 100
+    max_joint_velocity: 1.0  # rad/s
+    max_joint_acceleration: 2.0  # rad/s^2
+
+# Real robot control
+robot_control:
+  serial_port: "/dev/ttyUSB0"  # or COM port on Windows
+  baudrate: 1000000
+  control_frequency: 50  # Hz
+  safety:
+    max_relative_target_change: 0.1  # radians per update
+    emergency_stop_enabled: true
+    workspace_limits:
+      x: [-0.3, 0.3]
+      y: [-0.3, 0.3]
+      z: [0.0, 0.4]
+
+# Evaluation
+evaluation:
+  test_sets:
+    - normal_region
+    - workspace_boundary
+    - near_singularity
+    - noisy_input
+
+  metrics:
+    - position_error
+    - orientation_error
+    - success_rate
+    - solve_time_mean
+    - solve_time_p95
+    - joint_limit_violations
+    - max_joint_jump
+    - numerical_iterations
+
+# Paths
+paths:
+  urdf: "models/so101.urdf"
+  mujoco_model: "models/so101.xml"
+  dataset: "data/ik_dataset.h5"
+  results: "results/"
