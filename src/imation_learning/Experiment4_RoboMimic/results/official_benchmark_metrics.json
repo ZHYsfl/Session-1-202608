@@ -1,0 +1,484 @@
+{
+  "experiment": "Official RoboMimic v1.5 PH low-dimensional offline benchmark",
+  "scope": "Offline action prediction on official HDF5 train/valid masks. No MuJoCo rollout success is claimed.",
+  "config": {
+    "seed": 20260730,
+    "context_length": 10,
+    "batch_size": 512,
+    "epochs": 12,
+    "learning_rate": 0.0003,
+    "weight_decay": 0.0001,
+    "max_train_windows": 60000,
+    "max_valid_windows": 20000,
+    "early_stopping_patience": 4,
+    "bootstrap_repetitions": 2000,
+    "torch_threads": 12,
+    "device": "auto"
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "torch": "2.12.1+cpu",
+    "h5py": "3.15.1",
+    "device": "cpu",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "datasets": {
+    "lift": {
+      "task": "lift",
+      "environment": "Lift",
+      "file": "lift_ph_low_dim_v15.hdf5",
+      "sha256": "2067777cb8b532e9263dd09fd6448c41cc31224bb27be4a3b734010ae13eb540",
+      "bytes": 21084088,
+      "trajectories": 200,
+      "train_trajectories": 180,
+      "valid_trajectories": 20,
+      "total_samples": 9666,
+      "mean_trajectory_length": 48.33,
+      "min_trajectory_length": 36,
+      "max_trajectory_length": 64,
+      "observation_keys": [
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "object"
+      ],
+      "observation_dim": 19,
+      "action_dim": 7,
+      "benchmark_train_windows": 8640,
+      "benchmark_valid_windows": 1026
+    },
+    "can": {
+      "task": "can",
+      "environment": "PickPlaceCan",
+      "file": "can_ph_low_dim_v15.hdf5",
+      "sha256": "3f2eb92e0a5025d0095e866ac16cc8092d6a762abe27dec90dbaff9027282962",
+      "bytes": 46889752,
+      "trajectories": 200,
+      "train_trajectories": 180,
+      "valid_trajectories": 20,
+      "total_samples": 23207,
+      "mean_trajectory_length": 116.035,
+      "min_trajectory_length": 82,
+      "max_trajectory_length": 151,
+      "observation_keys": [
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "object"
+      ],
+      "observation_dim": 23,
+      "action_dim": 7,
+      "benchmark_train_windows": 20883,
+      "benchmark_valid_windows": 2324
+    },
+    "square": {
+      "task": "square",
+      "environment": "NutAssemblySquare",
+      "file": "square_ph_low_dim_v15.hdf5",
+      "sha256": "45d8cabb6d57a4c03e839aa5e4b3e58fb60fe8bd20e1951fec563a2abfd14951",
+      "bytes": 51145256,
+      "trajectories": 200,
+      "train_trajectories": 180,
+      "valid_trajectories": 20,
+      "total_samples": 30154,
+      "mean_trajectory_length": 150.77,
+      "min_trajectory_length": 107,
+      "max_trajectory_length": 236,
+      "observation_keys": [
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "object"
+      ],
+      "observation_dim": 23,
+      "action_dim": 7,
+      "benchmark_train_windows": 27165,
+      "benchmark_valid_windows": 2989
+    },
+    "transport": {
+      "task": "transport",
+      "environment": "TwoArmTransport",
+      "file": "transport_ph_low_dim_v15.hdf5",
+      "sha256": "260515618f4c8b660e54171497ecceb08c7c6463691a9ce862b158bcacd950b4",
+      "bytes": 303187328,
+      "trajectories": 200,
+      "train_trajectories": 180,
+      "valid_trajectories": 20,
+      "total_samples": 93752,
+      "mean_trajectory_length": 468.76,
+      "min_trajectory_length": 373,
+      "max_trajectory_length": 714,
+      "observation_keys": [
+        "robot0_eef_pos",
+        "robot0_eef_quat",
+        "robot0_gripper_qpos",
+        "robot1_eef_pos",
+        "robot1_eef_quat",
+        "robot1_gripper_qpos",
+        "object"
+      ],
+      "observation_dim": 59,
+      "action_dim": 14,
+      "benchmark_train_windows": 60000,
+      "benchmark_valid_windows": 9773
+    }
+  },
+  "results": {
+    "lift": {
+      "BC": {
+        "mse": 0.025118287652730942,
+        "rmse": 0.158487499988898,
+        "mae": 0.07605553418397903,
+        "trajectory_mse_mean": 0.024546324275434017,
+        "trajectory_mse_std": 0.01179920512406898,
+        "trajectory_bootstrap_95_ci": [
+          0.020652858077082784,
+          0.030524765548761924
+        ],
+        "phase_mse": {
+          "early": 0.011534552089869976,
+          "middle": 0.032269783318042755,
+          "late": 0.02489752136170864
+        },
+        "component_mse": {
+          "translation": 0.01711099222302437,
+          "rotation": 0.001962588168680668,
+          "gripper": 0.11860726773738861
+        },
+        "validation_samples": 1026,
+        "validation_trajectories": 20,
+        "model": "BC",
+        "best_epoch": 12,
+        "epochs_ran": 12,
+        "training_seconds": 1.2021956000244245,
+        "parameter_count": 72711,
+        "inference_ms_per_sample": 0.00047753906073921826
+      },
+      "BC-RNN": {
+        "mse": 0.029893474653363228,
+        "rmse": 0.17289729510134977,
+        "mae": 0.07566932588815689,
+        "trajectory_mse_mean": 0.029380308277904988,
+        "trajectory_mse_std": 0.014814157267084703,
+        "trajectory_bootstrap_95_ci": [
+          0.02350103993201628,
+          0.03582405994995497
+        ],
+        "phase_mse": {
+          "early": 0.012994722463190556,
+          "middle": 0.04059019312262535,
+          "late": 0.026196207851171494
+        },
+        "component_mse": {
+          "translation": 0.018282271921634674,
+          "rotation": 0.0022547373082488775,
+          "gripper": 0.1476432830095291
+        },
+        "validation_samples": 1026,
+        "validation_trajectories": 20,
+        "model": "BC-RNN",
+        "best_epoch": 11,
+        "epochs_ran": 12,
+        "training_seconds": 3.788188699982129,
+        "parameter_count": 152071,
+        "inference_ms_per_sample": 0.0070687499373889295
+      },
+      "BC-Transformer": {
+        "mse": 0.020809950307011604,
+        "rmse": 0.14425654337676197,
+        "mae": 0.07064343243837357,
+        "trajectory_mse_mean": 0.020743479114025833,
+        "trajectory_mse_std": 0.007119727974382584,
+        "trajectory_bootstrap_95_ci": [
+          0.018050185722531753,
+          0.023922832037787885
+        ],
+        "phase_mse": {
+          "early": 0.01220669038593769,
+          "middle": 0.026548227295279503,
+          "late": 0.01837143488228321
+        },
+        "component_mse": {
+          "translation": 0.016441842541098595,
+          "rotation": 0.0020463999826461077,
+          "gripper": 0.09020491689443588
+        },
+        "validation_samples": 1026,
+        "validation_trajectories": 20,
+        "model": "BC-Transformer",
+        "best_epoch": 9,
+        "epochs_ran": 12,
+        "training_seconds": 16.153424800024368,
+        "parameter_count": 286471,
+        "inference_ms_per_sample": 0.012095898455299903
+      }
+    },
+    "can": {
+      "BC": {
+        "mse": 0.03294369950890541,
+        "rmse": 0.18150399309355542,
+        "mae": 0.09615547209978104,
+        "trajectory_mse_mean": 0.03302428992465138,
+        "trajectory_mse_std": 0.006392438650749047,
+        "trajectory_bootstrap_95_ci": [
+          0.030338989768642934,
+          0.0356626052595675
+        ],
+        "phase_mse": {
+          "early": 0.01586875319480896,
+          "middle": 0.02986343763768673,
+          "late": 0.05598169192671776
+        },
+        "component_mse": {
+          "translation": 0.04057277739048004,
+          "rotation": 0.0023764593061059713,
+          "gripper": 0.10175816714763641
+        },
+        "validation_samples": 2324,
+        "validation_trajectories": 20,
+        "model": "BC",
+        "best_epoch": 12,
+        "epochs_ran": 12,
+        "training_seconds": 3.386880200006999,
+        "parameter_count": 73735,
+        "inference_ms_per_sample": 0.0005716797204513568
+      },
+      "BC-RNN": {
+        "mse": 0.03434224799275398,
+        "rmse": 0.18531661553339998,
+        "mae": 0.09351112693548203,
+        "trajectory_mse_mean": 0.03432009341195226,
+        "trajectory_mse_std": 0.010106796846140815,
+        "trajectory_bootstrap_95_ci": [
+          0.03003760572522879,
+          0.03872848378960043
+        ],
+        "phase_mse": {
+          "early": 0.013332116417586803,
+          "middle": 0.035035811364650726,
+          "late": 0.05388268083333969
+        },
+        "component_mse": {
+          "translation": 0.038863565772771835,
+          "rotation": 0.0023596622049808502,
+          "gripper": 0.11672604829072952
+        },
+        "validation_samples": 2324,
+        "validation_trajectories": 20,
+        "model": "BC-RNN",
+        "best_epoch": 7,
+        "epochs_ran": 11,
+        "training_seconds": 8.339048599940725,
+        "parameter_count": 152583,
+        "inference_ms_per_sample": 0.0062398435147770215
+      },
+      "BC-Transformer": {
+        "mse": 0.028871756047010422,
+        "rmse": 0.1699169092439314,
+        "mae": 0.0858544334769249,
+        "trajectory_mse_mean": 0.028586176317185165,
+        "trajectory_mse_std": 0.007130289466447942,
+        "trajectory_bootstrap_95_ci": [
+          0.025588703479152174,
+          0.031744020769838246
+        ],
+        "phase_mse": {
+          "early": 0.012524313293397427,
+          "middle": 0.027424495667219162,
+          "late": 0.047978393733501434
+        },
+        "component_mse": {
+          "translation": 0.03274491801857948,
+          "rotation": 0.0019581951200962067,
+          "gripper": 0.09799294918775558
+        },
+        "validation_samples": 2324,
+        "validation_trajectories": 20,
+        "model": "BC-Transformer",
+        "best_epoch": 10,
+        "epochs_ran": 12,
+        "training_seconds": 37.911011199932545,
+        "parameter_count": 286983,
+        "inference_ms_per_sample": 0.013043945273238933
+      }
+    },
+    "square": {
+      "BC": {
+        "mse": 0.0391220860183239,
+        "rmse": 0.19779303834645925,
+        "mae": 0.10051508247852325,
+        "trajectory_mse_mean": 0.03865042440593243,
+        "trajectory_mse_std": 0.012665034204483226,
+        "trajectory_bootstrap_95_ci": [
+          0.033566839660052215,
+          0.04463442089734599
+        ],
+        "phase_mse": {
+          "early": 0.016421519219875336,
+          "middle": 0.03719813749194145,
+          "late": 0.06549143046140671
+        },
+        "component_mse": {
+          "translation": 0.036797311156988144,
+          "rotation": 0.004902374930679798,
+          "gripper": 0.1487555354833603
+        },
+        "validation_samples": 2989,
+        "validation_trajectories": 20,
+        "model": "BC",
+        "best_epoch": 12,
+        "epochs_ran": 12,
+        "training_seconds": 3.980603100033477,
+        "parameter_count": 73735,
+        "inference_ms_per_sample": 0.0005019530817662599
+      },
+      "BC-RNN": {
+        "mse": 0.039797138422727585,
+        "rmse": 0.19949220140829463,
+        "mae": 0.1005319356918335,
+        "trajectory_mse_mean": 0.039128510467708114,
+        "trajectory_mse_std": 0.01700401977765529,
+        "trajectory_bootstrap_95_ci": [
+          0.031977967394050205,
+          0.04719225849956273
+        ],
+        "phase_mse": {
+          "early": 0.018456367775797844,
+          "middle": 0.04043513163924217,
+          "late": 0.059768155217170715
+        },
+        "component_mse": {
+          "translation": 0.03720932453870773,
+          "rotation": 0.006357014644891024,
+          "gripper": 0.14788097143173218
+        },
+        "validation_samples": 2989,
+        "validation_trajectories": 20,
+        "model": "BC-RNN",
+        "best_epoch": 9,
+        "epochs_ran": 12,
+        "training_seconds": 11.395903100026771,
+        "parameter_count": 152583,
+        "inference_ms_per_sample": 0.007358788934652694
+      },
+      "BC-Transformer": {
+        "mse": 0.03265463560819626,
+        "rmse": 0.18070593683716166,
+        "mae": 0.09144318848848343,
+        "trajectory_mse_mean": 0.03240218535065651,
+        "trajectory_mse_std": 0.011639182980203331,
+        "trajectory_bootstrap_95_ci": [
+          0.027683342413511128,
+          0.037727461722679434
+        ],
+        "phase_mse": {
+          "early": 0.012849658727645874,
+          "middle": 0.0337756872177124,
+          "late": 0.05014663562178612
+        },
+        "component_mse": {
+          "translation": 0.030406493693590164,
+          "rotation": 0.005091870203614235,
+          "gripper": 0.12208734452724457
+        },
+        "validation_samples": 2989,
+        "validation_trajectories": 20,
+        "model": "BC-Transformer",
+        "best_epoch": 10,
+        "epochs_ran": 12,
+        "training_seconds": 54.740513199940324,
+        "parameter_count": 286983,
+        "inference_ms_per_sample": 0.01486054702581896
+      }
+    },
+    "transport": {
+      "BC": {
+        "mse": 0.028961097821593285,
+        "rmse": 0.17017960459935638,
+        "mae": 0.07931999862194061,
+        "trajectory_mse_mean": 0.028121143858879805,
+        "trajectory_mse_std": 0.008341771192619002,
+        "trajectory_bootstrap_95_ci": [
+          0.024648440873716024,
+          0.03170904509723186
+        ],
+        "phase_mse": {
+          "early": 0.031470075249671936,
+          "middle": 0.02643163502216339,
+          "late": 0.03149139881134033
+        },
+        "component_mse": {
+          "translation": 0.032916534692049026,
+          "rotation": 0.001402002410031855,
+          "gripper": 0.09977207332849503
+        },
+        "validation_samples": 9773,
+        "validation_trajectories": 20,
+        "model": "BC",
+        "best_epoch": 11,
+        "epochs_ran": 12,
+        "training_seconds": 10.640955399954692,
+        "parameter_count": 84750,
+        "inference_ms_per_sample": 0.0006357422535074875
+      },
+      "BC-RNN": {
+        "mse": 0.03388094902038574,
+        "rmse": 0.18406778376561647,
+        "mae": 0.08262845873832703,
+        "trajectory_mse_mean": 0.03265838185325265,
+        "trajectory_mse_std": 0.011412250663450604,
+        "trajectory_bootstrap_95_ci": [
+          0.02831058193929493,
+          0.03764426021138205
+        ],
+        "phase_mse": {
+          "early": 0.03732258826494217,
+          "middle": 0.0319548137485981,
+          "late": 0.034277863800525665
+        },
+        "component_mse": {
+          "translation": 0.034438423812389374,
+          "rotation": 0.0018190320115536451,
+          "gripper": 0.1283942610025406
+        },
+        "validation_samples": 9773,
+        "validation_trajectories": 20,
+        "model": "BC-RNN",
+        "best_epoch": 5,
+        "epochs_ran": 9,
+        "training_seconds": 21.318439300055616,
+        "parameter_count": 158094,
+        "inference_ms_per_sample": 0.0064912112520687515
+      },
+      "BC-Transformer": {
+        "mse": 0.024221913889050484,
+        "rmse": 0.1556339098302503,
+        "mae": 0.06968957185745239,
+        "trajectory_mse_mean": 0.023493077792227268,
+        "trajectory_mse_std": 0.007268670307403151,
+        "trajectory_bootstrap_95_ci": [
+          0.02068718149093911,
+          0.026802897881716487
+        ],
+        "phase_mse": {
+          "early": 0.02844158373773098,
+          "middle": 0.021910063922405243,
+          "late": 0.02460956946015358
+        },
+        "component_mse": {
+          "translation": 0.025337111204862595,
+          "rotation": 0.0012587549863383174,
+          "gripper": 0.08976580947637558
+        },
+        "validation_samples": 9773,
+        "validation_trajectories": 20,
+        "model": "BC-Transformer",
+        "best_epoch": 11,
+        "epochs_ran": 12,
+        "training_seconds": 113.08836779999547,
+        "parameter_count": 292494,
+        "inference_ms_per_sample": 0.012366406053843093
+      }
+    }
+  }
+}
