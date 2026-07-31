@@ -1,0 +1,400 @@
+{
+  "experiment_1": {
+    "status": "completed_artifact_verified",
+    "dataset_samples": 7698,
+    "model_parameters": 972225,
+    "train_mse": 0.0684,
+    "validation_mse": 0.0144,
+    "model_h5_sha256": "9a9008c58f324609095176c6b21aa55508ea1cdf579495d1734a6485f3c61ba9"
+  },
+  "experiment_2": {
+    "bc_mean_return": 309.35,
+    "bc_success_rate": 0.2,
+    "dagger_mean_return": 500.0,
+    "dagger_success_rate": 1.0,
+    "absolute_return_gain": 190.64999999999998,
+    "success_rate_gain_percentage_points": 80.0,
+    "dataset_growth_factor": 30.701,
+    "beta_ablation": {
+      "0.9": [
+        {
+          "iteration": 0,
+          "beta": 1.0,
+          "dataset_size": 1000,
+          "mean_return": 309.35,
+          "std_return": 123.62767691742816,
+          "median_return": 276.0,
+          "success_rate": 0.2
+        },
+        {
+          "iteration": 1,
+          "beta": 0.9,
+          "dataset_size": 2500,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 2,
+          "beta": 0.81,
+          "dataset_size": 4000,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 3,
+          "beta": 0.7290000000000001,
+          "dataset_size": 5500,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 4,
+          "beta": 0.6561,
+          "dataset_size": 7000,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 5,
+          "beta": 0.5904900000000001,
+          "dataset_size": 8500,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 6,
+          "beta": 0.531441,
+          "dataset_size": 10000,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        }
+      ],
+      "0.5": [
+        {
+          "iteration": 0,
+          "beta": 1.0,
+          "dataset_size": 1000,
+          "mean_return": 309.35,
+          "std_return": 123.62767691742816,
+          "median_return": 276.0,
+          "success_rate": 0.2
+        },
+        {
+          "iteration": 1,
+          "beta": 0.5,
+          "dataset_size": 1893,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 2,
+          "beta": 0.25,
+          "dataset_size": 3393,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 3,
+          "beta": 0.125,
+          "dataset_size": 4893,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 4,
+          "beta": 0.0625,
+          "dataset_size": 6393,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 5,
+          "beta": 0.03125,
+          "dataset_size": 7893,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 6,
+          "beta": 0.015625,
+          "dataset_size": 9393,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        }
+      ],
+      "0.1": [
+        {
+          "iteration": 0,
+          "beta": 1.0,
+          "dataset_size": 1000,
+          "mean_return": 309.35,
+          "std_return": 123.62767691742816,
+          "median_return": 276.0,
+          "success_rate": 0.2
+        },
+        {
+          "iteration": 1,
+          "beta": 0.1,
+          "dataset_size": 2500,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 2,
+          "beta": 0.010000000000000002,
+          "dataset_size": 3707,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 3,
+          "beta": 0.0010000000000000002,
+          "dataset_size": 5207,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 4,
+          "beta": 0.00010000000000000002,
+          "dataset_size": 6707,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 5,
+          "beta": 1.0000000000000003e-05,
+          "dataset_size": 8207,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        },
+        {
+          "iteration": 6,
+          "beta": 1.0000000000000004e-06,
+          "dataset_size": 9707,
+          "mean_return": 500.0,
+          "std_return": 0.0,
+          "median_return": 500.0,
+          "success_rate": 1.0
+        }
+      ]
+    },
+    "state_coverage": {
+      "x": {
+        "initial_1_to_99_percent_width": 0.2730662991370105,
+        "aggregated_1_to_99_percent_width": 3.811757720775252,
+        "coverage_gain": 13.95909247249405
+      },
+      "x velocity": {
+        "initial_1_to_99_percent_width": 0.41973066546436644,
+        "aggregated_1_to_99_percent_width": 1.288512654684414,
+        "coverage_gain": 3.069855887843877
+      },
+      "pole angle": {
+        "initial_1_to_99_percent_width": 0.01476177880932128,
+        "aggregated_1_to_99_percent_width": 0.09990902734079679,
+        "coverage_gain": 6.768088631548221
+      },
+      "angle velocity": {
+        "initial_1_to_99_percent_width": 0.6003287775229358,
+        "aggregated_1_to_99_percent_width": 0.7905865501261399,
+        "coverage_gain": 1.3169226259454725
+      }
+    }
+  },
+  "experiment_3": {
+    "action_error_analysis": {
+      "definition": "MSE between predicted P(expert action=1|state) and the deterministic expert label on independent policy-visited states.",
+      "bc_pooled": {
+        "probability_mse": 0.22131478874470065,
+        "action_error_rate": 0.2507666666666667,
+        "binary_cross_entropy": 1.358322474380929,
+        "sample_count": 30000
+      },
+      "dagger_pooled": {
+        "probability_mse": 0.006404994363086036,
+        "action_error_rate": 0.009266666666666666,
+        "binary_cross_entropy": 0.020764235364586325,
+        "sample_count": 30000
+      },
+      "mse_reduction_percent": 97.10593476404571,
+      "action_error_reduction_percentage_points": 24.150000000000002
+    },
+    "policy_state_distributions": {
+      "expert": {
+        "state_count": 20000,
+        "x_1_to_99_percent": [
+          -1.7410030198429205,
+          1.769819586411428
+        ],
+        "theta_1_to_99_percent": [
+          -0.0707987534087086,
+          0.06824602413846687
+        ]
+      },
+      "bc": {
+        "state_count": 12341,
+        "x_1_to_99_percent": [
+          -2.2599712477861713,
+          2.2971496389521566
+        ],
+        "theta_1_to_99_percent": [
+          -0.03691743128607323,
+          0.036640435010512916
+        ]
+      },
+      "dagger": {
+        "state_count": 20000,
+        "x_1_to_99_percent": [
+          -1.867241636721117,
+          1.7649443863138656
+        ],
+        "theta_1_to_99_percent": [
+          -0.07502546490578538,
+          0.0815415883891909
+        ]
+      }
+    }
+  },
+  "experiment_4": {
+    "tasks": {
+      "lift": {
+        "BC": {
+          "mse": 0.025118287652730942,
+          "trajectory_bootstrap_95_ci": [
+            0.020652858077082784,
+            0.030524765548761924
+          ]
+        },
+        "BC-RNN": {
+          "mse": 0.029893474653363228,
+          "trajectory_bootstrap_95_ci": [
+            0.02350103993201628,
+            0.03582405994995497
+          ]
+        },
+        "BC-Transformer": {
+          "mse": 0.020809950307011604,
+          "trajectory_bootstrap_95_ci": [
+            0.018050185722531753,
+            0.023922832037787885
+          ]
+        }
+      },
+      "can": {
+        "BC": {
+          "mse": 0.03294369950890541,
+          "trajectory_bootstrap_95_ci": [
+            0.030338989768642934,
+            0.0356626052595675
+          ]
+        },
+        "BC-RNN": {
+          "mse": 0.03434224799275398,
+          "trajectory_bootstrap_95_ci": [
+            0.03003760572522879,
+            0.03872848378960043
+          ]
+        },
+        "BC-Transformer": {
+          "mse": 0.028871756047010422,
+          "trajectory_bootstrap_95_ci": [
+            0.025588703479152174,
+            0.031744020769838246
+          ]
+        }
+      },
+      "square": {
+        "BC": {
+          "mse": 0.0391220860183239,
+          "trajectory_bootstrap_95_ci": [
+            0.033566839660052215,
+            0.04463442089734599
+          ]
+        },
+        "BC-RNN": {
+          "mse": 0.039797138422727585,
+          "trajectory_bootstrap_95_ci": [
+            0.031977967394050205,
+            0.04719225849956273
+          ]
+        },
+        "BC-Transformer": {
+          "mse": 0.03265463560819626,
+          "trajectory_bootstrap_95_ci": [
+            0.027683342413511128,
+            0.037727461722679434
+          ]
+        }
+      },
+      "transport": {
+        "BC": {
+          "mse": 0.028961097821593285,
+          "trajectory_bootstrap_95_ci": [
+            0.024648440873716024,
+            0.03170904509723186
+          ]
+        },
+        "BC-RNN": {
+          "mse": 0.03388094902038574,
+          "trajectory_bootstrap_95_ci": [
+            0.02831058193929493,
+            0.03764426021138205
+          ]
+        },
+        "BC-Transformer": {
+          "mse": 0.024221913889050484,
+          "trajectory_bootstrap_95_ci": [
+            0.02068718149093911,
+            0.026802897881716487
+          ]
+        }
+      }
+    },
+    "four_task_mean_mse": {
+      "BC": 0.031536292750388384,
+      "BC-RNN": 0.034478452522307634,
+      "BC-Transformer": 0.026639563962817192
+    },
+    "transformer_improvement_over_bc_percent": 15.527280984892833,
+    "best_model_by_task": {
+      "lift": "BC-Transformer",
+      "can": "BC-Transformer",
+      "square": "BC-Transformer",
+      "transport": "BC-Transformer"
+    }
+  }
+}

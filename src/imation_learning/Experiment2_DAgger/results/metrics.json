@@ -1,0 +1,435 @@
+{
+  "experiment": "CartPole-v1 DAgger",
+  "config": {
+    "seed": 20260730,
+    "max_steps": 500,
+    "initial_expert_episodes": 2,
+    "dagger_iterations": 6,
+    "dagger_rollouts": 10,
+    "beta_decay": 0.5,
+    "ablation_rollouts": 3,
+    "evaluation_episodes": 80,
+    "distribution_episodes": 40,
+    "solved_steps": 475
+  },
+  "runtime": {
+    "python": "3.12.13",
+    "numpy": "2.3.5",
+    "scikit_learn": "1.9.0",
+    "platform": "Windows-11-10.0.26200-SP0"
+  },
+  "evaluation": {
+    "reset_distribution": {
+      "x": [
+        -0.35,
+        0.35
+      ],
+      "x_dot": [
+        -0.45,
+        0.45
+      ],
+      "theta": [
+        -0.105,
+        0.105
+      ],
+      "theta_dot": [
+        -0.45,
+        0.45
+      ]
+    },
+    "episodes": 80,
+    "success_definition": "episode length >= 475"
+  },
+  "expert": {
+    "mean_return": 500.0,
+    "std_return": 0.0,
+    "median_return": 500.0,
+    "success_rate": 1.0
+  },
+  "bc": {
+    "iteration": 0,
+    "beta": 1.0,
+    "dataset_size": 1000,
+    "mean_return": 309.35,
+    "std_return": 123.62767691742816,
+    "median_return": 276.0,
+    "success_rate": 0.2
+  },
+  "dagger": {
+    "iteration": 6,
+    "beta": 0.015625,
+    "dataset_size": 30701,
+    "mean_return": 500.0,
+    "std_return": 0.0,
+    "median_return": 500.0,
+    "success_rate": 1.0
+  },
+  "history": [
+    {
+      "iteration": 0,
+      "beta": 1.0,
+      "dataset_size": 1000,
+      "mean_return": 309.35,
+      "std_return": 123.62767691742816,
+      "median_return": 276.0,
+      "success_rate": 0.2
+    },
+    {
+      "iteration": 1,
+      "beta": 0.5,
+      "dataset_size": 5701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    },
+    {
+      "iteration": 2,
+      "beta": 0.25,
+      "dataset_size": 10701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    },
+    {
+      "iteration": 3,
+      "beta": 0.125,
+      "dataset_size": 15701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    },
+    {
+      "iteration": 4,
+      "beta": 0.0625,
+      "dataset_size": 20701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    },
+    {
+      "iteration": 5,
+      "beta": 0.03125,
+      "dataset_size": 25701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    },
+    {
+      "iteration": 6,
+      "beta": 0.015625,
+      "dataset_size": 30701,
+      "mean_return": 500.0,
+      "std_return": 0.0,
+      "median_return": 500.0,
+      "success_rate": 1.0
+    }
+  ],
+  "learning_curve": [
+    {
+      "iteration": 0,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 309.35,
+      "dagger_success_rate": 0.2
+    },
+    {
+      "iteration": 1,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    },
+    {
+      "iteration": 2,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    },
+    {
+      "iteration": 3,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    },
+    {
+      "iteration": 4,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    },
+    {
+      "iteration": 5,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    },
+    {
+      "iteration": 6,
+      "bc_mean_return": 309.35,
+      "bc_success_rate": 0.2,
+      "dagger_mean_return": 500.0,
+      "dagger_success_rate": 1.0
+    }
+  ],
+  "beta_ablation": {
+    "0.9": [
+      {
+        "iteration": 0,
+        "beta": 1.0,
+        "dataset_size": 1000,
+        "mean_return": 309.35,
+        "std_return": 123.62767691742816,
+        "median_return": 276.0,
+        "success_rate": 0.2
+      },
+      {
+        "iteration": 1,
+        "beta": 0.9,
+        "dataset_size": 2500,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 2,
+        "beta": 0.81,
+        "dataset_size": 4000,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 3,
+        "beta": 0.7290000000000001,
+        "dataset_size": 5500,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 4,
+        "beta": 0.6561,
+        "dataset_size": 7000,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 5,
+        "beta": 0.5904900000000001,
+        "dataset_size": 8500,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 6,
+        "beta": 0.531441,
+        "dataset_size": 10000,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      }
+    ],
+    "0.5": [
+      {
+        "iteration": 0,
+        "beta": 1.0,
+        "dataset_size": 1000,
+        "mean_return": 309.35,
+        "std_return": 123.62767691742816,
+        "median_return": 276.0,
+        "success_rate": 0.2
+      },
+      {
+        "iteration": 1,
+        "beta": 0.5,
+        "dataset_size": 1893,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 2,
+        "beta": 0.25,
+        "dataset_size": 3393,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 3,
+        "beta": 0.125,
+        "dataset_size": 4893,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 4,
+        "beta": 0.0625,
+        "dataset_size": 6393,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 5,
+        "beta": 0.03125,
+        "dataset_size": 7893,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 6,
+        "beta": 0.015625,
+        "dataset_size": 9393,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      }
+    ],
+    "0.1": [
+      {
+        "iteration": 0,
+        "beta": 1.0,
+        "dataset_size": 1000,
+        "mean_return": 309.35,
+        "std_return": 123.62767691742816,
+        "median_return": 276.0,
+        "success_rate": 0.2
+      },
+      {
+        "iteration": 1,
+        "beta": 0.1,
+        "dataset_size": 2500,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 2,
+        "beta": 0.010000000000000002,
+        "dataset_size": 3707,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 3,
+        "beta": 0.0010000000000000002,
+        "dataset_size": 5207,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 4,
+        "beta": 0.00010000000000000002,
+        "dataset_size": 6707,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 5,
+        "beta": 1.0000000000000003e-05,
+        "dataset_size": 8207,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      },
+      {
+        "iteration": 6,
+        "beta": 1.0000000000000004e-06,
+        "dataset_size": 9707,
+        "mean_return": 500.0,
+        "std_return": 0.0,
+        "median_return": 500.0,
+        "success_rate": 1.0
+      }
+    ]
+  },
+  "action_error": {
+    "definition": "MSE between predicted P(expert action=1|state) and the deterministic expert label on independent policy-visited states.",
+    "bc": {
+      "expert_states": {
+        "probability_mse": 0.2163884796105463,
+        "action_error_rate": 0.24115,
+        "binary_cross_entropy": 1.434203914574555,
+        "sample_count": 20000
+      },
+      "bc_states": {
+        "probability_mse": 0.22227590102334113,
+        "action_error_rate": 0.27023741998217327,
+        "binary_cross_entropy": 0.8979529727426551,
+        "sample_count": 12341
+      },
+      "dagger_states": {
+        "probability_mse": 0.2197518866356516,
+        "action_error_rate": 0.24275,
+        "binary_cross_entropy": 1.497814201687384,
+        "sample_count": 20000
+      },
+      "pooled": {
+        "probability_mse": 0.22131478874470065,
+        "action_error_rate": 0.2507666666666667,
+        "binary_cross_entropy": 1.358322474380929,
+        "sample_count": 30000
+      }
+    },
+    "dagger": {
+      "expert_states": {
+        "probability_mse": 0.007469038273204727,
+        "action_error_rate": 0.0109,
+        "binary_cross_entropy": 0.024295916735324125,
+        "sample_count": 20000
+      },
+      "bc_states": {
+        "probability_mse": 0.0013516830569641034,
+        "action_error_rate": 0.0021878291872619725,
+        "binary_cross_entropy": 0.004369066661209821,
+        "sample_count": 12341
+      },
+      "dagger_states": {
+        "probability_mse": 0.009324095573890804,
+        "action_error_rate": 0.01285,
+        "binary_cross_entropy": 0.030888480733403008,
+        "sample_count": 20000
+      },
+      "pooled": {
+        "probability_mse": 0.006404994363086036,
+        "action_error_rate": 0.009266666666666666,
+        "binary_cross_entropy": 0.020764235364586325,
+        "sample_count": 30000
+      }
+    }
+  }
+}

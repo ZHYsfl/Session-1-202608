@@ -1,0 +1,30 @@
+{
+  "analytical": {
+    "success": 4,
+    "total": 50,
+    "mean_err_mm": 243.5118744448455,
+    "median_err_mm": 229.30447295282457,
+    "mean_time_ms": 0.015134000350371934
+  },
+  "numerical": {
+    "success": 49,
+    "total": 50,
+    "mean_err_mm": 0.8893276374839517,
+    "median_err_mm": 0.9009203517550964,
+    "mean_time_ms": 28.345248000259744
+  },
+  "neural": {
+    "success": 50,
+    "total": 50,
+    "mean_err_mm": 17.243609503481604,
+    "median_err_mm": 13.640116501543277,
+    "mean_time_ms": 0.6910700001026271
+  },
+  "hybrid": {
+    "success": 50,
+    "total": 50,
+    "mean_err_mm": 14.59064364502952,
+    "median_err_mm": 12.310036190634683,
+    "mean_time_ms": 5.435164000155055
+  }
+}

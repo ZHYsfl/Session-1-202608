@@ -1,0 +1,75 @@
+#VRML_SIM R2025a utf8
+
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/factory/containers/protos/WoodenBox.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/balls/protos/Ball.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/rocks/protos/Rock.proto"
+
+WorldInfo {
+}
+Viewpoint {
+  orientation -0.32121823219987844 0.4610437939577863 0.8271985658567084 1.3999802689192977
+  position -0.3110599083425807 -1.1125398362713768 1.1441855369860559
+}
+TexturedBackground {
+}
+TexturedBackgroundLight {
+}
+RectangleArena {
+}
+WoodenBox {
+  translation 0 0 0.06
+  size 0.1 0.1 0.1
+}
+WoodenBox {
+  translation 0 -0.29 0.06
+  name "wooden box(1)"
+  size 0.1 0.1 0.1
+}
+WoodenBox {
+  translation -0.27 -0.29 0.06
+  name "wooden box(2)"
+  size 0.1 0.1 0.1
+}
+Ball {
+  translation 0.46750025809833434 0 0.03241367200000009
+  rotation 0 -1 0 1.8094131557900142
+}
+Ball {
+  translation -0.32767089024304336 0.14674625839649863 0.03241367200000001
+  rotation 1.83286471410236e-13 -8.865986893347638e-14 -1 1.1317253777300151
+  name "ball(2)"
+}
+Ball {
+  translation 0.3649686466672249 0 0.03241367199999999
+  rotation 0 1 0 2.045951245231444e-06
+  name "ball(1)"
+}
+Rock {
+  translation -0.26 0.28 0.06
+}
+Robot {
+  translation 0.16 0 0.1
+  children [
+    RangeFinder {
+      width 640
+      height 480
+      fieldOfView 1.0
+      maxRange 3
+    }
+    Camera {
+      width 640
+      height 480
+      fieldOfView 1.0
+    }
+    Shape {
+      geometry Box {
+        size 0.01 0.01 0.01
+      }
+    }
+  ]
+  controller "collector"
+  supervisor TRUE
+}
