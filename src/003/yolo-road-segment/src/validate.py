@@ -139,7 +139,21 @@ def validate(args: argparse.Namespace) -> Path:
     LOGGER.info("Validating model: %s", model_source)
     model = YOLO(model_source, task="segment")
     metrics = model.val(**options)
-    save_dir = Path(model.validator.save_dir).resolve()
+
+    # Ultralytics 不保证 model.validator 在 val() 返回后仍然存在，
+    # 优先从 metrics 取 save_dir，再回退到 model.validator 或按选项构造路径。
+    save_dir: Path | None = None
+    if hasattr(metrics, "save_dir") and metrics.save_dir:
+        save_dir = Path(str(metrics.save_dir)).resolve()
+    elif hasattr(model, "validator") and model.validator is not None:
+        save_dir = Path(str(model.validator.save_dir)).resolve()
+
+    if save_dir is None:
+        save_dir = (
+            Path(options.get("project", "outputs/val"))
+            / str(options.get("name", "val"))
+        ).resolve()
+
     summary = {
         "stage": "val",
         "model": model_source,
