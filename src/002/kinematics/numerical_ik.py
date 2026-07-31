@@ -5,7 +5,7 @@ from typing import Optional, Tuple
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from kinematics.forward_kinematics import ForwardKinematics
+from kinematics.forward_kinematics_simple import ForwardKinematics
 from utils.math_utils import check_joint_limits, clamp_joint_angles
 
 

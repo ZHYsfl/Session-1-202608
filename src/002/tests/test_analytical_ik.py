@@ -25,9 +25,13 @@ class TestAnalyticalIK(unittest.TestCase):
         )
 
     def test_reachable_point(self):
-        """Test IK for a reachable point."""
-        # Point within workspace
-        target_pos = np.array([0.2, 0.1, 0.15])
+        """Test IK for a reachable point.
+
+        Target verified reachable under the simplified model (respects the
+        +/-1.57 rad wrist limit). Note: with these nominal link lengths the
+        reachable set is small -- the central finding of the paper.
+        """
+        target_pos = np.array([0.24, 0.0, 0.08])
         target_alpha = 0.0
         target_psi = 0.0
 
@@ -49,7 +53,7 @@ class TestAnalyticalIK(unittest.TestCase):
 
     def test_both_branches(self):
         """Test that both elbow-up and elbow-down solutions are found."""
-        target_pos = np.array([0.2, 0.0, 0.15])
+        target_pos = np.array([0.24, 0.0, 0.08])
         target_alpha = 0.0
         target_psi = 0.0
 
@@ -84,7 +88,7 @@ class TestAnalyticalIK(unittest.TestCase):
 
     def test_closest_solution(self):
         """Test that closest solution is selected."""
-        target_pos = np.array([0.2, 0.0, 0.15])
+        target_pos = np.array([0.24, 0.0, 0.08])
         target_alpha = 0.0
         target_psi = 0.0
 

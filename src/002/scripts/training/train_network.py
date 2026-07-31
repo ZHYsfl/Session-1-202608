@@ -6,7 +6,9 @@ import sys
 import torch
 from torch.utils.data import DataLoader
 
-sys.path.insert(0, str(Path(__file__).parent))
+# project root src/002 is three levels up: scripts/training/<this file>
+_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(_ROOT))
 
 from neural_network import IKNet, IKDataset, IKTrainer
 from utils.config_loader import load_config, get_joint_limits

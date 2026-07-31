@@ -17,13 +17,16 @@ class TestForwardKinematics(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Set up test fixtures."""
-        # This will fail until URDF is available
+        # Resolve URDF relative to the project root (src/002) so the test
+        # passes regardless of the current working directory.
+        root = Path(__file__).resolve().parents[1]
+        urdf = root / 'models' / 'so101_new_calib.urdf'
         try:
-            cls.fk = ForwardKinematics('models/so101.urdf')
+            cls.fk = ForwardKinematics(str(urdf))
             cls.has_urdf = True
-        except:
+        except Exception as e:
             cls.has_urdf = False
-            print("Warning: URDF not found, skipping FK tests")
+            print(f"Warning: URDF not loaded ({e}), skipping FK tests")
 
     def test_zero_configuration(self):
         """Test forward kinematics at zero configuration."""
