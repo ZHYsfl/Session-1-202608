@@ -1,0 +1,501 @@
+#VRML_SIM R2025a utf8
+
+# A2 项目（VOA 强化学习防碰撞）001 硬件侧仿真环境
+# 参数与 src/001/A2/api.md §0 常量表对齐：
+#   场地 4x4 m，雷达 360° x 64 线 / 量程 3.5 m，basicTimeStep 10 ms
+# 底盘几何（真机对齐时改这里与 env_server.py 中的同名常量）：
+#   轮半径 R=0.05 m，轮距 L=0.20 m，车身外接圆 ~0.170 m < robot_radius 0.18 m
+
+WorldInfo {
+  basicTimeStep 10
+}
+Viewpoint {
+  orientation -0.263 0.263 0.9282 1.6452
+  position 0 -5.2 3.2
+}
+Background {
+  skyColor [
+    0.2 0.24 0.3
+  ]
+}
+DirectionalLight {
+  direction -0.4 -0.6 -0.8
+  intensity 1.3
+  castShadows TRUE
+}
+
+# ---------- 地面（静态） ----------
+DEF FLOOR Solid {
+  translation 0 0 -0.001
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.56 0.56 0.6
+        roughness 0.9
+      }
+      geometry Plane {
+        size 5 5
+      }
+    }
+  ]
+  name "floor"
+  boundingObject Plane {
+    size 4.2 4.2
+  }
+  locked TRUE
+}
+
+# ---------- 围墙 4x4 m（静态，墙高 0.3 m > 雷达高度 0.2 m） ----------
+DEF WALL_XP Solid {
+  translation 2 0 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.75 0.35 0.25
+        roughness 0.8
+      }
+      geometry Box {
+        size 0.05 4.1 0.3
+      }
+    }
+  ]
+  name "wall_x+"
+  boundingObject Box {
+    size 0.05 4.1 0.3
+  }
+  locked TRUE
+}
+DEF WALL_XN Solid {
+  translation -2 0 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.75 0.35 0.25
+        roughness 0.8
+      }
+      geometry Box {
+        size 0.05 4.1 0.3
+      }
+    }
+  ]
+  name "wall_x-"
+  boundingObject Box {
+    size 0.05 4.1 0.3
+  }
+  locked TRUE
+}
+DEF WALL_YP Solid {
+  translation 0 2 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.75 0.5 0.25
+        roughness 0.8
+      }
+      geometry Box {
+        size 4.1 0.05 0.3
+      }
+    }
+  ]
+  name "wall_y+"
+  boundingObject Box {
+    size 4.1 0.05 0.3
+  }
+  locked TRUE
+}
+DEF WALL_YN Solid {
+  translation 0 -2 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.75 0.5 0.25
+        roughness 0.8
+      }
+      geometry Box {
+        size 4.1 0.05 0.3
+      }
+    }
+  ]
+  name "wall_y-"
+  boundingObject Box {
+    size 4.1 0.05 0.3
+  }
+  locked TRUE
+}
+
+# ---------- 障碍物 x8（静态，reset 时由 supervisor 随机摆放/旋转） ----------
+# OBSTACLE_RADII（与 env_server.py 中一致）：0.212 0.25 0.177 0.247 0.15 0.20 0.18 0.12
+DEF OBSTACLE_0 Solid {
+  translation 0.8 0.9 0.2
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.85 0.65 0.13
+        roughness 0.7
+      }
+      geometry Box {
+        size 0.3 0.3 0.4
+      }
+    }
+  ]
+  name "obstacle_0"
+  boundingObject Box {
+    size 0.3 0.3 0.4
+  }
+}
+DEF OBSTACLE_1 Solid {
+  translation -0.9 0.7 0.175
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.2 0.6 0.8
+        roughness 0.7
+      }
+      geometry Box {
+        size 0.4 0.3 0.35
+      }
+    }
+  ]
+  name "obstacle_1"
+  boundingObject Box {
+    size 0.4 0.3 0.35
+  }
+}
+DEF OBSTACLE_2 Solid {
+  translation 0.2 -1 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.6 0.3 0.75
+        roughness 0.7
+      }
+      geometry Box {
+        size 0.25 0.25 0.3
+      }
+    }
+  ]
+  name "obstacle_2"
+  boundingObject Box {
+    size 0.25 0.25 0.3
+  }
+}
+DEF OBSTACLE_3 Solid {
+  translation -0.5 -0.5 0.225
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.9 0.4 0.4
+        roughness 0.7
+      }
+      geometry Box {
+        size 0.35 0.35 0.45
+      }
+    }
+  ]
+  name "obstacle_3"
+  boundingObject Box {
+    size 0.35 0.35 0.45
+  }
+}
+DEF OBSTACLE_4 Solid {
+  translation 1.2 -0.4 0.2
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.4 0.75 0.4
+        roughness 0.7
+      }
+      geometry Cylinder {
+        height 0.4
+        radius 0.15
+      }
+    }
+  ]
+  name "obstacle_4"
+  boundingObject Cylinder {
+    height 0.4
+    radius 0.15
+  }
+}
+DEF OBSTACLE_5 Solid {
+  translation -1.3 -1.2 0.175
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.45 0.55 0.9
+        roughness 0.7
+      }
+      geometry Cylinder {
+        height 0.35
+        radius 0.2
+      }
+    }
+  ]
+  name "obstacle_5"
+  boundingObject Cylinder {
+    height 0.35
+    radius 0.2
+  }
+}
+DEF OBSTACLE_6 Solid {
+  translation 0.6 0.1 0.225
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.85 0.5 0.7
+        roughness 0.7
+      }
+      geometry Cylinder {
+        height 0.45
+        radius 0.18
+      }
+    }
+  ]
+  name "obstacle_6"
+  boundingObject Cylinder {
+    height 0.45
+    radius 0.18
+  }
+}
+DEF OBSTACLE_7 Solid {
+  translation -1.1 1.4 0.15
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.5 0.8 0.75
+        roughness 0.7
+      }
+      geometry Cylinder {
+        height 0.3
+        radius 0.12
+      }
+    }
+  ]
+  name "obstacle_7"
+  boundingObject Cylinder {
+    height 0.3
+    radius 0.12
+  }
+}
+
+# ---------- 目标点标记（纯视觉：无 boundingObject，雷达和碰撞都忽略它） ----------
+DEF GOAL Solid {
+  translation 1.2 1.2 0.005
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0 0.85 0.15
+        emissiveColor 0 0.5 0.1
+        roughness 0.5
+      }
+      geometry Cylinder {
+        height 0.01
+        radius 0.15
+      }
+    }
+  ]
+  name "goal_marker"
+}
+
+# ---------- 差速底盘小车 ----------
+# 车身 0.26 x 0.20 x 0.10，外接圆半径 ~0.170 m；雷达安装高度 0.20 m
+DEF ROBOT Robot {
+  translation 0 0 0
+  rotation 0 0 1 0
+  children [
+    DEF BODY Solid {
+      translation 0 0 0.1
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.12 0.4 0.9
+            metalness 0.4
+            roughness 0.5
+          }
+          geometry Box {
+            size 0.26 0.2 0.1
+          }
+        }
+      ]
+      name "body"
+      # 纯视觉节点：碰撞几何集中在 ROBOT 根节点的 boundingObject（BODY 无 physics，
+      # 若自带 boundingObject 会被 Webots 忽略并告警 "collisions will have no effect"）
+      # 前后支撑由两个 BallJoint 滚珠承担（见下方，滚动代替拖擦）
+    }
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        position 0
+        anchor 0 0.1 0.05
+        axis 0 1 0
+      }
+      device [
+        RotationalMotor {
+          name "left wheel motor"
+          maxVelocity 15
+          maxTorque 10
+        }
+        PositionSensor {
+          name "left wheel sensor"
+        }
+      ]
+      endPoint Solid {
+        translation 0 0.1 0.05
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.1 0.1 0.1
+              roughness 0.85
+            }
+            geometry Cylinder {
+              height 0.02
+              radius 0.05
+            }
+          }
+        ]
+        name "left_wheel"
+        boundingObject Cylinder {
+          height 0.02
+          radius 0.05
+        }
+        physics Physics {
+          density -1
+          mass 0.2
+        }
+      }
+    }
+    HingeJoint {
+      jointParameters HingeJointParameters {
+        position 0
+        anchor 0 -0.1 0.05
+        axis 0 1 0
+      }
+      device [
+        RotationalMotor {
+          name "right wheel motor"
+          maxVelocity 15
+          maxTorque 10
+        }
+        PositionSensor {
+          name "right wheel sensor"
+        }
+      ]
+      endPoint Solid {
+        translation 0 -0.1 0.05
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.1 0.1 0.1
+              roughness 0.85
+            }
+            geometry Cylinder {
+              height 0.02
+              radius 0.05
+            }
+          }
+        ]
+        name "right_wheel"
+        boundingObject Cylinder {
+          height 0.02
+          radius 0.05
+        }
+        physics Physics {
+          density -1
+          mass 0.2
+        }
+      }
+    }
+    # ---------- 前后万向滚珠脚撑（被动 BallJoint：承重但滚动，不拖曳车身） ----------
+    # 教训：固定球脚撑的静摩擦会"锁死"车身、抢载导致轮子打滑；滚珠滚动阻力≈0
+    BallJoint {
+      jointParameters BallJointParameters {
+        anchor 0.1 0 0.03
+      }
+      endPoint Solid {
+        translation 0.1 0 0.03
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.15 0.15 0.15
+            }
+            geometry Sphere {
+              radius 0.025
+            }
+          }
+        ]
+        name "caster_front"
+        boundingObject Sphere {
+          radius 0.025
+        }
+        physics Physics {
+          density -1
+          mass 0.05
+        }
+      }
+    }
+    BallJoint {
+      jointParameters BallJointParameters {
+        anchor -0.1 0 0.03
+      }
+      endPoint Solid {
+        translation -0.1 0 0.03
+        children [
+          Shape {
+            appearance PBRAppearance {
+              baseColor 0.15 0.15 0.15
+            }
+            geometry Sphere {
+              radius 0.025
+            }
+          }
+        ]
+        name "caster_rear"
+        boundingObject Sphere {
+          radius 0.025
+        }
+        physics Physics {
+          density -1
+          mass 0.05
+        }
+      }
+    }
+    DEF LIDAR Lidar {
+      translation 0 0 0.2
+      children [
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.9 0.12 0.12
+            roughness 0.4
+          }
+          geometry Cylinder {
+            height 0.04
+            radius 0.04
+          }
+        }
+      ]
+      name "lidar"
+      type "fixed"
+      fieldOfView 6.283185
+      horizontalResolution 64
+      numberOfLayers 1
+      near 0.03
+      minRange 0.05
+      maxRange 3.5
+    }
+  ]
+  name "diffbot"
+  controller "env_server"
+  supervisor TRUE
+  locked TRUE
+  boundingObject Transform {
+    translation 0 0 0.1
+    children [
+      Box {
+        size 0.26 0.2 0.1
+      }
+    ]
+  }
+  physics Physics {
+    density -1
+    mass 4
+  }
+}
