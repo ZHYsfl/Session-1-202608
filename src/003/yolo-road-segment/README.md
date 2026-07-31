@@ -126,7 +126,7 @@ python -m scripts.check_dataset
 ## 5. 完整流水线
 
 ```bash
-python -m scripts.run_pipeline --stage all --clean-run
+python -m scripts.run_pipeline --stage all 
 ```
 
 依次执行：
@@ -139,17 +139,18 @@ check -> train -> val -> predict
 - 验证结果保存在 `outputs/val/{run_name}_val_{时间戳}/`
 - 推理结果保存在 `outputs/predict/{run_name}_predict_{时间戳}/`
 - `run_pipeline.py` 会自动找到最新的训练目录并用于后续验证/推理
+- 可以再添加 `--clean-run` 参数，每次运行会清空对应模型的输出目录，再重新生成
 
 只训练：
 
 ```bash
-python -m scripts.run_pipeline --stage train --clean-run
+python -m scripts.run_pipeline --stage train
 ```
 
 指定 GPU 0：
 
 ```bash
-python -m scripts.run_pipeline --stage all --device 0 --clean-run
+python -m scripts.run_pipeline --stage all --device 0
 ```
 
 ## 6. 单独运行核心阶段
