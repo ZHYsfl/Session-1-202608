@@ -162,3 +162,21 @@ dist/
 
 
 .claude/
+# LaTeX intermediate files (keep final paper PDFs and figure assets)
+paper/**/build/
+paper/**/*.aux
+paper/**/*.bbl
+paper/**/*.bcf
+paper/**/*.blg
+paper/**/*.fdb_latexmk
+paper/**/*.fls
+paper/**/*.lof
+paper/**/*.lot
+paper/**/*.nav
+paper/**/*.out
+paper/**/*.run.xml
+paper/**/*.snm
+paper/**/*.synctex.gz
+paper/**/*.toc
+paper/**/*.vrb
+paper/**/*.xdv
