@@ -168,6 +168,8 @@ def test_sac_update():
 
 def main():
     global MODEL
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     print("=" * 60)
     print("003 离线自测（不依赖 server / Webots）")
     print("=" * 60)
