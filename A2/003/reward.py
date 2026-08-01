@@ -20,7 +20,7 @@ def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
             + 200   (若 goal_reached)
             − 200   (若 collision)
             − 0.1                              # 时间惩罚，每步
-            − 3.0 × max(0, 0.5 − min(lidar_t)) # 障碍接近惩罚（run2 新增）
+            − 8.0 × max(0, 0.5 − min(lidar_t)) # 障碍接近惩罚（W_DANGER 须 > W_APPROACH）
             − 0.5 × (a0 − a0_prev)² − 0.5 × (a1 − a1_prev)²   # 平滑惩罚
 
     参数：
