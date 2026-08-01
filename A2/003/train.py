@@ -24,6 +24,8 @@ import logging
 import sys
 from pathlib import Path
 
+import numpy as np
+
 try:  # websockets >= 14
     from websockets.asyncio.client import connect
 except ImportError:  # websockets < 14
@@ -242,6 +244,25 @@ async def amain(args) -> int:
     agent = SACAgent(device, models)
     buffer = ReplayBuffer(BUFFER_CAPACITY, OBS_DIM, ACT_DIM)
 
+    if args.preload:
+        # SACfD 冷启动：用 scripted_expert --dump 采集的演示轨迹预填 buffer。
+        # 演示数据不覆盖 warmup 计数逻辑——buffer 里有数据即开始更新。
+        data = np.load(args.preload)
+        # 教训：NpzFile 的 data["obs"] 每次访问都重新解压整包，直接写进循环是
+        # O(n²)（3.2 万条卡 82s+）。先一次性取出数组再循环。
+        obs_npz, act_npz = data["obs"], data["act"]
+        rew_npz, nobs_npz, done_npz = data["rew"], data["next_obs"], data["done"]
+        n = len(rew_npz)
+        assert obs_npz.shape == (n, OBS_DIM), \
+            f"preload obs 形状 {obs_npz.shape} 与 OBS_DIM={OBS_DIM} 不符"
+        assert act_npz.shape == (n, ACT_DIM), \
+            f"preload act 形状 {act_npz.shape} 与 ACT_DIM={ACT_DIM} 不符"
+        for i in range(n):
+            buffer.push(obs_npz[i], act_npz[i], float(rew_npz[i]),
+                        nobs_npz[i], float(done_npz[i]))
+        log.info("演示数据预填: %s → %d 条（回报均值 %.2f）", args.preload, n,
+                 float(rew_npz.mean()))
+
     episode_start = 0
     if args.resume:
         meta = model_mod.load_checkpoint(args.resume, models,
@@ -403,6 +424,8 @@ def parse_args(argv=None):
                     help="torch 设备（默认自动：cuda 可用则 cuda）")
     ap.add_argument("--resume", default=None,
                     help="从 checkpoint 恢复（ckpt_*.pt 路径）")
+    ap.add_argument("--preload", default=None,
+                    help="演示数据 npz（scripted_expert --dump 产物），开训前预填 buffer")
     ap.add_argument("--save-dir", default="checkpoints")
     ap.add_argument("--log-dir", default="logs")
     # 课程学习（api.md §2.2）

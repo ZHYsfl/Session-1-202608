@@ -11,6 +11,16 @@ from config import (D_SAFE, R_COLLISION, R_GOAL_REACHED, R_TIME_STEP,
                     W_APPROACH, W_DANGER, W_SMOOTH)
 
 
+def _despiked_min(lidar) -> float:
+    """空间相干最小值（与 server 侧 env_server._despiked_min 同算法）：
+    每根射线取与左右邻居共 3 根的中位数，再全局取 min。
+    抑制 Webots Lidar 运动中偶发的孤立单射线尖峰（幻影近距回波）。"""
+    lid = np.asarray(lidar, dtype=np.float64)
+    a, b, c = np.roll(lid, 1), lid, np.roll(lid, -1)
+    med = a + b + c - np.minimum(np.minimum(a, b), c) - np.maximum(np.maximum(a, b), c)
+    return float(np.min(med))
+
+
 def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
                    obs_next: dict) -> float:
     """
@@ -38,7 +48,7 @@ def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
     if obs_next["flags"]["collision"]:
         r += R_COLLISION
     r += R_TIME_STEP
-    r -= W_DANGER * max(0.0, D_SAFE - float(np.min(obs_next["lidar"])))
+    r -= W_DANGER * max(0.0, D_SAFE - _despiked_min(obs_next["lidar"]))
     r -= W_SMOOTH * (float(a01[0]) - float(a01_prev[0])) ** 2
     r -= W_SMOOTH * (float(a01[1]) - float(a01_prev[1])) ** 2
     return float(r)

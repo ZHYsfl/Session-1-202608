@@ -17,6 +17,7 @@ import asyncio
 import csv
 import json
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -34,14 +35,17 @@ PROTOCOL_VERSION = "1.1"
 ENV_NAME = "webots_diffbot_v1"
 # 默认只监听本机回环（127.0.0.1）：本机训练直接用，且不会触发 Windows 防火墙弹窗。
 # 若 003 需要从局域网另一台机器连接，改为 "0.0.0.0"（首次会弹防火墙授权，允许即可）。
-WS_HOST, WS_PORT = "127.0.0.1", 8765
+# 异步 RL 多实例：每个 webots 实例用环境变量 ENV_WS_PORT 指定各自端口
+# （启动器 export 后 webots 把它传给 controller 进程）；缺省 8765 保持 api.md 约定。
+WS_HOST = "127.0.0.1"
+WS_PORT = int(os.environ.get("ENV_WS_PORT", "8765"))
 
 LIDAR_COUNT = 64
 LIDAR_MAX_RANGE = 3.5
 CONTROL_DT = 0.1            # s，一个 action 推进的仿真时间
 PHYSICS_DT_MS = 10          # 与 world 文件 basicTimeStep 一致
 SUBSTEPS = int(CONTROL_DT * 1000 / PHYSICS_DT_MS)  # 10
-MAX_EPISODE_TIME = 30.0
+MAX_EPISODE_TIME = 60.0     # 默认单局时限 60 s（v1.2 起放宽：绕障往返需 15~25 s，30 s 太紧）
 V_MAX = 0.5                 # m/s
 W_MAX = 1.5                 # rad/s
 GOAL_TOLERANCE = 0.15       # m
@@ -57,10 +61,12 @@ WHEEL_TRACK = 0.20          # L
 # reset 采样约束（api.md §5.2）
 START_GOAL_MIN_DIST = 2.0   # 起点-目标最小间距
 SAMPLE_CLEARANCE = 0.4      # 起点/目标距障碍物表面的最小距离
+OBSTACLE_GAP = 0.55         # 障碍物表面之间的最小距离；需 > 车身直径 0.36 才过得去
 ROBOT_SAMPLE_LIM = 1.6      # 起点/目标采样范围 [-1.6, 1.6]^2
 OBSTACLE_POS_LIM = 1.5      # 障碍物中心采样范围
-MIN_OBSTACLES = 5           # 每局激活障碍物数量 [5, 8]
-N_OBSTACLES = 8
+MIN_ACTIVE = 5              # 每局激活障碍物数量区间 [MIN_ACTIVE, MAX_ACTIVE]
+MAX_ACTIVE = 8              # 调成相等即固定数量；课程学习可先稀疏后加密
+N_OBSTACLES = 8             # 世界文件里可用的障碍物节点总数
 # 各障碍物外接圆半径（与 .wbt 几何一致，用于采样间距检查）
 OBSTACLE_RADII = [0.212, 0.25, 0.177, 0.247, 0.15, 0.20, 0.18, 0.12]
 
@@ -99,11 +105,17 @@ class EnvServer:
         # ---- 设备 ----
         self.lidar = self.robot.getDevice("lidar")
         self.lidar.enable(PHYSICS_DT_MS)
+        self.lidar.enablePointCloud()
+        # 四轮驱动：四个普通圆形车轮，同侧前后轮严格同角速度，
+        # 由同一个 (v,w) 指令经差速运动学解算（api.md §5.3），无独立轮速
         self.motor_l = self.robot.getDevice("left wheel motor")
         self.motor_r = self.robot.getDevice("right wheel motor")
+        self.motor_fl = self.robot.getDevice("front left wheel motor")
+        self.motor_fr = self.robot.getDevice("front right wheel motor")
         self.pos_l = self.robot.getDevice("left wheel sensor")
         self.pos_r = self.robot.getDevice("right wheel sensor")
-        for m in (self.motor_l, self.motor_r):
+        self.motors = (self.motor_l, self.motor_r, self.motor_fl, self.motor_fr)
+        for m in self.motors:
             m.setPosition(float("inf"))   # 速度控制模式
             m.setVelocity(0.0)
         for p in (self.pos_l, self.pos_r):
@@ -179,34 +191,122 @@ class EnvServer:
         Webots 雷达数组的第 0 条朝向、排列方向随版本/节点实现而定。
         这里不猜约定：把车传送到已知位姿、对比实测与解析距离，
         在 128 种候选重排（2 方向 x 64 偏移）里选误差最小的一种。
+
+        实战教训：标定位姿必须同时偏离 x、y 两条对称轴（取 (1.5, 0.7)）。
+        曾经把车放在 (1.5, 0)——左/右墙等距，场景镜像对称，CCW/CW 两种
+        拟合误差完全相同，方向纯粹是蒙的；蒙错的后果是 obs 里雷达左右镜像，
+        脚本专家的"避障"变成"朝障碍撞"，三种控制律成功率全部只有 ~30%，
+        且碰撞复核全部"真实"（几何确实碰上了，是观测把方向报反了）。
+        两个方向的误差必须悬殊，否则视为标定不可信。
         """
         # 撤走全部障碍物（沉到地板下），避免干扰标定
         for tf_trans, _, _ in self.obstacles:
             tf_trans.setSFVec3f([50.0, 50.0, -1.0])
-        self.tf_translation.setSFVec3f([1.5, 0.0, 0.0])
+        # 目标标记也撤走（即便改成 Transform 后理论不可见，标定场景必须空场验证）
+        self.tf_goal.setSFVec3f([50.0, 50.0, -1.0])
+        self.tf_translation.setSFVec3f([1.5, 0.7, 0.0])
         self.tf_rotation.setSFRotation([0, 0, 1, 0])
         self.robot.simulationResetPhysics()
         for _ in range(5):
             self.robot.step(PHYSICS_DT_MS)
 
         raw = self._read_lidar_raw()
-        truth = self._analytic_wall_ranges(1.5, 0.0)
+        truth = self._analytic_wall_ranges(1.5, 0.7)
 
         best_err, best_index = float("inf"), None
+        dir_best_err = {}
         for direction in (1, -1):
+            d_err = float("inf")
             for off in range(LIDAR_COUNT):
                 idx = [(off + direction * k) % LIDAR_COUNT for k in range(LIDAR_COUNT)]
                 err = float(np.mean(np.abs(raw[idx] - truth)))
-                if err < best_err:
-                    best_err, best_index = err, idx
+                if err < d_err:
+                    d_err = err
+                    if err < best_err:
+                        best_err, best_index = err, idx
+            dir_best_err[direction] = d_err
         direction_name = "CCW" if best_index[1] == (best_index[0] + 1) % LIDAR_COUNT else "CW"
-        print(f"[env_server] lidar 标定: 方向={direction_name} 平均误差={best_err * 1000:.1f} mm",
+        print(f"[env_server] lidar 标定: 方向={direction_name} 平均误差={best_err * 1000:.1f} mm "
+              f"(CCW最优={dir_best_err[1] * 1000:.0f} mm, CW最优={dir_best_err[-1] * 1000:.0f} mm)",
+              flush=True)
+        if min(dir_best_err.values()) * 3 > max(dir_best_err.values()):
+            print("[env_server] 警告: 两个方向的标定误差相近——场景对称，方向不可信！",
+                  flush=True)
+        # DEBUG（标定审计）：逐射线残差，确认"最优重排"是否真的每根射线都对得上
+        resid = np.abs(raw[best_index] - truth)
+        worst = int(np.argmax(resid))
+        bad = [f"k{k}∠{k * 360.0 / LIDAR_COUNT:.0f}° raw={raw[best_index[k]]:.2f} "
+               f"truth={truth[k]:.2f}" for k in range(LIDAR_COUNT) if resid[k] > 0.1]
+        print(f"[env_server] DEBUG 标定: 最大残差={resid[worst]:.3f} m @ 射线{worst} "
+              f"残差>0.1m 的射线数={int(np.sum(resid > 0.1))} "
+              f"重排前8={list(best_index[:8])}\n"
+              f"[env_server] DEBUG 异常射线: {'; '.join(bad)}",
               flush=True)
         if best_err > 0.08:
             print("[env_server] 警告: 雷达标定误差偏大，请检查场地尺寸/雷达配置是否被改动",
                   flush=True)
 
         # 还原机器人初始位姿
+        self.tf_translation.setSFVec3f(self.init_translation)
+        self.tf_rotation.setSFRotation(self.init_rotation)
+        self.robot.simulationResetPhysics()
+        for _ in range(3):
+            self.robot.step(PHYSICS_DT_MS)
+
+        # ---- DEBUG 静态探针（两个决定性检验）----
+        # 检验1：空场（障碍+目标全撤走）静止车，任何 <3.5 的读数都是自检测幻影
+        for tf_trans, _, _ in self.obstacles:
+            tf_trans.setSFVec3f([50.0, 50.0, -1.0])
+        self.tf_goal.setSFVec3f([50.0, 50.0, -1.0])
+        self.tf_translation.setSFVec3f([0.0, 0.0, 0.0])
+        self.tf_rotation.setSFRotation([0, 0, 1, 0])
+        self.robot.simulationResetPhysics()
+        for _ in range(5):
+            self.robot.step(PHYSICS_DT_MS)
+        lid = self._read_lidar_raw()  # 标定中 _lidar_index 尚未生成，用原始序
+        m, k = float(np.min(lid)), int(np.argmin(lid))
+        print(f"[env_server] DEBUG 空场探针: min={m:.3f} @k{k} "
+              f"(>3.4 为正常；<0.2 为自检测幻影)", flush=True)
+        # 检验2：车停在目标旁 0.15 m 正对它，看目标标记是否被雷达看到
+        self.tf_goal.setSFVec3f([1.2, 1.2, 0.005])
+        self.tf_translation.setSFVec3f([1.2, 1.35, 0.0])
+        self.tf_rotation.setSFRotation([0, 0, 1, -math.pi / 2])
+        self.robot.simulationResetPhysics()
+        for _ in range(5):
+            self.robot.step(PHYSICS_DT_MS)
+        lid = self._read_lidar_raw()
+        m, k = float(np.min(lid)), int(np.argmin(lid))
+        print(f"[env_server] DEBUG 目标探针: min={m:.3f} @k{k} "
+              f"(若 ≈0.15 则目标标记对雷达可见——成功圈不可达；应 ≫0.18)",
+              flush=True)
+        self.tf_goal.setSFVec3f([50.0, 50.0, -1.0])
+        self.tf_translation.setSFVec3f(self.init_translation)
+        self.tf_rotation.setSFRotation(self.init_rotation)
+        self.robot.simulationResetPhysics()
+        for _ in range(3):
+            self.robot.step(PHYSICS_DT_MS)
+
+        # 检验3：静止车 + 两个已知障碍物（已知位姿），连读 10 帧
+        # 区分"幻影来自运动"还是"幻影来自障碍物/传感器配置"
+        o0_t, _, o0_r = self.obstacles[0]
+        o1_t, _, o1_r = self.obstacles[1]
+        o0_t.setSFVec3f([0.8, 0.3, self._obstacle_z(0)])
+        o1_t.setSFVec3f([-0.5, 0.6, self._obstacle_z(1)])
+        self.tf_translation.setSFVec3f([0.0, 0.0, 0.0])
+        self.tf_rotation.setSFRotation([0, 0, 1, 0])
+        self.robot.simulationResetPhysics()
+        worst = (3.5, -1)
+        for _ in range(10):
+            self.robot.step(PHYSICS_DT_MS)
+            lid = self._read_lidar_raw()
+            m, k = float(np.min(lid)), int(np.argmin(lid))
+            worst = min(worst, (m, k))
+        # 理论：障碍0(Box 0.3x0.3)中心(0.8,0.3)→前表面约 0.65；障碍1中心(-0.5,0.6)
+        print(f"[env_server] DEBUG 静态障碍探针: 10帧最小读数={worst[0]:.3f} @k{worst[1]} "
+              f"(应 ≈0.65；<0.5 即幻影)", flush=True)
+        # 还原
+        for tf_trans, _, _ in self.obstacles:
+            tf_trans.setSFVec3f([50.0, 50.0, -1.0])
         self.tf_translation.setSFVec3f(self.init_translation)
         self.tf_rotation.setSFRotation(self.init_rotation)
         self.robot.simulationResetPhysics()
@@ -224,9 +324,31 @@ class EnvServer:
         r = np.where(np.isfinite(r), r, LIDAR_MAX_RANGE)
         return np.clip(r, 0.0, LIDAR_MAX_RANGE)
 
+    @staticmethod
+    def _median3(lid):
+        """逐射线 3 邻域中位数滤波（环形），返回等长数组。
+        a+b+c-min-max 即逐元素 median(lid[k-1], lid[k], lid[k+1]) 的无循环实现。"""
+        a, b, c = np.roll(lid, 1), lid, np.roll(lid, -1)
+        return a + b + c - np.minimum(np.minimum(a, b), c) - np.maximum(np.maximum(a, b), c)
+
+    @classmethod
+    def _despiked_min(cls, lid):
+        """空间相干最小值：3 邻域中位数滤波后取 min。
+
+        实战教训：Webots Lidar 在运动中会偶发孤立单射线尖峰（读数 0.05~0.18 m
+        但对应方向 0.3~3 m 内无任何实物，静止时不出现），直接把 min(lidar)
+        送进碰撞判定会产生大量幻影碰撞。真实近物在近距离必被 ≥2 根相邻射线
+        同时看到，中位数滤波保留它们、抹除孤立尖峰。对已滤波的扫描幂等。
+        """
+        return float(np.min(cls._median3(lid)))
+
     def _read_lidar(self):
-        """重排到 api 顺序（第 0 条 = 车头正前，逆时针排列）。"""
-        return self._read_lidar_raw()[self._lidar_index]
+        """重排到 api 顺序（第 0 条 = 车头正前，逆时针排列）并做中位数滤波。
+
+        obs、碰撞判定、客户端奖励统一使用这份滤波后的扫描，保证全链路语义一致：
+        尖峰既然是传感器伪影，就不该出现在任何下游消费者的输入里。
+        """
+        return self._median3(self._read_lidar_raw()[self._lidar_index])
 
     def _pose(self):
         """返回 (x, y, yaw)，supervisor 真值。"""
@@ -277,7 +399,7 @@ class EnvServer:
         self.goal_xy = (float(gx), float(gy))
 
         # 2) 随机摆 N 个障碍物（互不重叠、离起点/目标表面 >= 0.4 m）
-        n_active = int(self.rng.integers(MIN_OBSTACLES, N_OBSTACLES + 1))
+        n_active = int(self.rng.integers(MIN_ACTIVE, MAX_ACTIVE + 1))
         order = self.rng.permutation(N_OBSTACLES)
         placed = []  # (x, y, r)
         for rank, obs_i in enumerate(order):
@@ -290,7 +412,7 @@ class EnvServer:
                         continue
                     if math.hypot(ox - gx, oy - gy) < r + SAMPLE_CLEARANCE:
                         continue
-                    if any(math.hypot(ox - px, oy - py) < r + pr + 0.3
+                    if any(math.hypot(ox - px, oy - py) < r + pr + OBSTACLE_GAP
                            for px, py, pr in placed):
                         continue
                     pos = (float(ox), float(oy))
@@ -310,7 +432,7 @@ class EnvServer:
         self.tf_goal.setSFVec3f([self.goal_xy[0], self.goal_xy[1], 0.005])
 
         # 4) 停电机、清物理、静置几拍让传感器刷新
-        for m in (self.motor_l, self.motor_r):
+        for m in self.motors:
             m.setVelocity(0.0)
         self.robot.simulationResetPhysics()
         for _ in range(3):
@@ -320,8 +442,15 @@ class EnvServer:
         self.episode_id += 1
         self.step_id = 0
         self.min_lidar_ever = float(np.min(self._read_lidar()))
+        self.max_tilt = 0.0      # DEBUG 尖峰溯源
+        self.spike_info = None   # DEBUG 尖峰溯源
+        self.spikes_suppressed = 0  # 被空间相干滤波拦下的孤立尖峰计数
         print(f"[env_server] episode {self.episode_id} 开始 (seed={seed}, "
               f"障碍物={len(placed)}, 目标=({self.goal_xy[0]:.2f},{self.goal_xy[1]:.2f}))",
+              flush=True)
+        # DEBUG（几何审计）：场景布局 + 起点位姿，供离线复算碰撞是否真实
+        print(f"[env_server] DEBUG 场景: 起点=({sx:.3f},{sy:.3f},yaw={float(self.tf_rotation.getSFRotation()[3]):.3f}) "
+              f"障碍={[(round(px,3), round(py,3), r) for px, py, r in placed]}",
               flush=True)
         return self._build_obs(0.0, 0.0, False, False, False)
 
@@ -336,10 +465,13 @@ class EnvServer:
         w = float(np.clip(w, -W_MAX, W_MAX))
 
         # 差速运动学：api.md §5.3  ω_r = (v + w*L/2)/R, ω_l = (v - w*L/2)/R
+        # 四驱：同侧前后轮严格同角速度，整车共享同一个 (v,w) 指令
         omega_r = (v + w * WHEEL_TRACK / 2) / WHEEL_RADIUS
         omega_l = (v - w * WHEEL_TRACK / 2) / WHEEL_RADIUS
         self.motor_r.setVelocity(omega_r)
+        self.motor_fr.setVelocity(omega_r)
         self.motor_l.setVelocity(omega_l)
+        self.motor_fl.setVelocity(omega_l)
 
         pos_l_prev, pos_r_prev = self.pos_l.getValue(), self.pos_r.getValue()
 
@@ -350,10 +482,50 @@ class EnvServer:
             if self.robot.step(PHYSICS_DT_MS) == -1:
                 raise SystemExit("Webots 仿真已退出")
             executed += 1
-            m = float(np.min(self._read_lidar()))
+            lid_raw = self._read_lidar_raw()[self._lidar_index]  # 未滤波（诊断对照用）
+            lid = self._median3(lid_raw)                         # 滤波后：判定与 obs 统一用
+            m_raw = float(np.min(lid_raw))
+            m = float(np.min(lid))                # 空间相干最小值：孤立尖峰不参与判定
             self.min_lidar_ever = min(self.min_lidar_ever, m)
+            if m_raw < 0.25 < m:
+                self.spikes_suppressed += 1
+            # DEBUG：尖峰溯源——首次 RAW <0.3 时记录瞬时俯仰/横滚；全程统计最大姿态角
+            o = self.self_node.getOrientation()
+            pitch = math.degrees(math.asin(max(-1.0, min(1.0, -o[2]))))
+            roll = math.degrees(math.asin(max(-1.0, min(1.0, o[5]))))
+            self.max_tilt = max(self.max_tilt, abs(pitch), abs(roll))
+            if m_raw < 0.3 and self.spike_info is None:
+                self.spike_info = (m_raw, int(np.argmin(lid_raw)), pitch, roll)
             if m < ROBOT_RADIUS:
                 collision = True
+                # DEBUG（几何审计）：碰撞瞬间的位姿 + 最短射线编号/角度/读数，
+                # 与 reset 时的场景布局对照，可离线复算该读数是否有实物对应；
+                # pitch/roll 用于排查车身倾斜导致雷达扫到自身/地面
+                k = int(np.argmin(lid))
+                dx, dy, dyaw = self._pose()
+                o = self.self_node.getOrientation()  # 行优先
+                pitch = math.asin(max(-1.0, min(1.0, -o[2])))
+                roll = math.asin(max(-1.0, min(1.0, o[5])))
+                # 点云里最近的点（雷达系坐标）：直接看幻影点落在哪个部件/方向/高度
+                try:
+                    pc = self.lidar.getPointCloud()
+                    if pc:
+                        pmin = min(pc, key=lambda p: p.x * p.x + p.y * p.y)
+                        pdesc = (f"点云最近点=({pmin.x:.3f},{pmin.y:.3f},"
+                                 f"{pmin.z:.3f}) 共{len(pc)}点")
+                        pts = " ".join(f"({p.x:.2f},{p.y:.2f},{p.z:.2f})" for p in pc)
+                        pdesc += f"\n[env_server] DEBUG 点云全量: {pts}"
+                    else:
+                        pdesc = "点云为空"
+                except Exception as e:
+                    pdesc = f"点云获取失败:{e}"
+                rays = " ".join(f"{v:.2f}" for v in lid)
+                print(f"[env_server] DEBUG 碰撞: 位姿=({dx:.3f},{dy:.3f},"
+                      f"yaw={dyaw:.3f}) 俯仰={math.degrees(pitch):.1f}° "
+                      f"横滚={math.degrees(roll):.1f}° 最短射线=k{k} "
+                      f"(机体系 {k * 360.0 / LIDAR_COUNT:.1f}°) 读数={m:.3f} "
+                      f"{pdesc}\n[env_server] DEBUG 全帧: {rays}",
+                      flush=True)
                 break
 
         dt = executed * PHYSICS_DT_MS / 1000.0
@@ -376,7 +548,7 @@ class EnvServer:
             outcome = ("collision" if collision else
                        "goal_reached" if goal_reached else "timeout")
             self._log_episode(outcome, math.hypot(self.goal_xy[0] - x, self.goal_xy[1] - y))
-            for m_ in (self.motor_l, self.motor_r):
+            for m_ in self.motors:
                 m_.setVelocity(0.0)
         return obs
 
@@ -385,11 +557,14 @@ class EnvServer:
             self.episode_id, self.step_id, outcome,
             round(self.min_lidar_ever, 4), round(final_dist, 4), self.seed_used])
         self.log_fp.flush()
+        spike = (f"尖峰={self.spike_info}" if self.spike_info else "尖峰=无")
         print(f"[env_server] episode {self.episode_id} 结束: {outcome}, "
-              f"步数={self.step_id}, 最终距离={final_dist:.2f} m", flush=True)
+              f"步数={self.step_id}, 最终距离={final_dist:.2f} m "
+              f"[DEBUG 最大姿态角={self.max_tilt:.1f}° {spike} "
+              f"拦尖峰={self.spikes_suppressed}]", flush=True)
 
     def stop_motors(self):
-        for m in (self.motor_l, self.motor_r):
+        for m in self.motors:
             m.setVelocity(0.0)
 
 

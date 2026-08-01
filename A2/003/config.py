@@ -16,7 +16,7 @@ ENV_NAME = "webots_diffbot_v1"  # 期望的环境标识，不符仅告警（以�
 LIDAR_COUNT = 64
 LIDAR_MAX_RANGE = 3.5
 CONTROL_DT = 0.1
-MAX_EPISODE_TIME = 30.0
+MAX_EPISODE_TIME = 60.0   # v1.2 起放宽（与 server 默认一致）
 V_MAX = 0.5
 W_MAX = 1.5
 GOAL_TOLERANCE = 0.15
@@ -61,10 +61,10 @@ CONVERGE_RATE = 0.9             # 成功率收敛线（≥90%）
 CKPT_INTERVAL = 50              # 每 N 个训练 episode 存一次 checkpoint
 
 # ================= 课程学习（api.md §2.2 config_override） =================
-# 前期把时限压短（如 15 s），每局快速结束、单位时间积累更多经验；
-# 过了前 CUR_SHORT_EPISODES 局后放宽回完整时限（30 s）。
+# 前期把时限压短（30 s），每局快速结束、单位时间积累更多经验；
+# 过了前 CUR_SHORT_EPISODES 局后放宽回完整时限（60 s，v1.2 起）。
 CUR_SHORT_EPISODES = 300
-CUR_SHORT_TIME = 15.0
+CUR_SHORT_TIME = 30.0
 
 # ================= 连接 =================
 WS_URI = "ws://127.0.0.1:8765"
