@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 env_server.py — A2 项目（VOA 强化学习防碰撞）001 硬件侧
-Webots 仿真环境的 WebSocket server，实现 src/001/A2/api.md v1.0 协议。
+Webots 仿真环境的 WebSocket server，实现 src/001/A2/api.md v1.1 协议。
 
 运行方式：由 Webots 作为 rl_arena.wbt 中 ROBOT 节点的 controller 自动启动。
 开发测试：配合 tools/random_client.py 使用。
@@ -31,7 +31,7 @@ except ImportError:  # websockets < 14
 from controller import Supervisor
 
 # ================= 全局常量（与 api.md §0 完全一致，改动必须同步升协议版本） =================
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 ENV_NAME = "webots_diffbot_v1"
 # 默认只监听本机回环（127.0.0.1）：本机训练直接用，且不会触发 Windows 防火墙弹窗。
 # 若 003 需要从局域网另一台机器连接，改为 "0.0.0.0"（首次会弹防火墙授权，允许即可）。
