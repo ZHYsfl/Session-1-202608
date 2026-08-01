@@ -372,9 +372,10 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 ### 5.2 reset 内部流程
 
 1. 用 seed 初始化 RNG（numpy `default_rng(seed)`，seed=-1 时随机取）；
-2. `simulationResetPhysics()`；随机摆放障碍物（ supervisor `setSFVec3f`，不重叠、不堵死）；
-3. 随机选起点与目标点：两点间距 ≥ 2.0 m，且各自距最近障碍物 ≥ 0.4 m，不满足则重采；
-4. `episode_id += 1`，`step_id = 0`，`t = 0.0`；回初始 obs。
+2. 随机采起点与目标点：两点间距 ≥ 2.0 m，不满足则重采（最多 200 次）；
+3. 随机激活 5~8 个障碍物并摆放（supervisor `setSFVec3f`：互不重叠、离起点/目标表面 ≥ 0.4 m，100 次采不到合法位置则弃用该障碍物）；未激活的障碍物沉到地板下；
+4. 传送机器人（随机朝向）与目标标记 → 电机置 0 → `simulationResetPhysics()` → 静置 3 个物理步；
+5. `episode_id += 1`，`step_id = 0`，`t = 0.0`；回初始 obs。
 
 ### 5.3 action 内部流程（每收到一条）
 
@@ -391,7 +392,7 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 
 ### 5.5 日志
 
-每 episode 结束写一行 CSV：`episode_id, steps, outcome, min_lidar_ever, final_dist`。
+每 episode 结束写一行 CSV：`episode_id, steps, outcome, min_lidar_ever, final_dist, seed`（前五列见上；`seed` 为附加列，记录本局实际使用的种子，便于复现场景）。
 
 ---
 

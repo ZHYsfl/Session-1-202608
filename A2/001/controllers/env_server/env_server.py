@@ -18,7 +18,6 @@ import csv
 import json
 import math
 import sys
-import time
 from pathlib import Path
 
 import numpy as np
@@ -320,7 +319,6 @@ class EnvServer:
         # 5) episode 状态复位，回初始 obs
         self.episode_id += 1
         self.step_id = 0
-        self.min_lidar_ever = LIDAR_MAX_RANGE
         self.min_lidar_ever = float(np.min(self._read_lidar()))
         print(f"[env_server] episode {self.episode_id} 开始 (seed={seed}, "
               f"障碍物={len(placed)}, 目标=({self.goal_xy[0]:.2f},{self.goal_xy[1]:.2f}))",
@@ -442,8 +440,9 @@ async def handle_client(ws, path=None):
                     await send_error(ws, "WRONG_STATE", "RUNNING 状态下收到 reset")
                     break
                 seed = msg.get("seed")
-                if not isinstance(seed, int) or isinstance(seed, bool):
-                    await send_error(ws, "BAD_FIELD", "seed 必须是 int（-1 表示随机）")
+                if not isinstance(seed, int) or isinstance(seed, bool) or seed < -1:
+                    await send_error(ws, "BAD_FIELD",
+                                     "seed 必须是 int：-1 表示随机，非负整数表示复现该种子场景")
                     break
                 override = msg.get("config_override", "__missing__")
                 if override == "__missing__":
@@ -458,6 +457,10 @@ async def handle_client(ws, path=None):
                         await send_error(ws, "BAD_FIELD",
                                          f"config_override 不允许的键: {sorted(bad)}，"
                                          f"仅支持 {sorted(OVERRIDABLE_KEYS)}")
+                        break
+                    if "max_episode_time" not in override:
+                        await send_error(ws, "BAD_FIELD",
+                                         "config_override 不能为空字典，必须含 max_episode_time")
                         break
                     if not _is_number(override["max_episode_time"]) \
                             or override["max_episode_time"] <= 0:
@@ -510,6 +513,12 @@ async def handle_client(ws, path=None):
         raise
     except Exception as exc:  # 连接断开或内部异常
         print(f"[env_server] 连接结束: {type(exc).__name__}: {exc}", flush=True)
+        # §2.7：内部异常尽力回 INTERNAL（若连接已断开则静默）
+        if not ws.closed:
+            try:
+                await send_error(ws, "INTERNAL", f"{type(exc).__name__}: {exc}")
+            except Exception:
+                pass
 
     print("[env_server] 会话结束，关闭仿真", flush=True)
     ENV.stop_motors()
