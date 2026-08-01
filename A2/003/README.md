@@ -138,16 +138,19 @@ r = 5.0 × (dist_{t-1} − dist_t) + 200·[goal_reached] − 200·[collision]
 
 ## 与 009 的协作（model.py 加载）
 
-`models.py` 按优先级加载（幂等，日志打印实际来源）：
+**009 已交付**（`../009/model.py`，接口自测通过）。`models.py` 按优先级自动加载
+（幂等，启动日志打印实际来源）：
 
-1. 环境变量 `MODEL_MODULE=<path>` 显式指定 009 交付的 model.py
+1. 环境变量 `MODEL_MODULE=<path>` 显式指定
 2. 003 根目录或上级目录存在 `model.py`
-3. 回退 `tools/model_stub.py` 内置桩（接口与 api_doc.md §7 完全一致，含 `--selftest`）
+3. 同级 `009/model.py`（默认三方布局 `A2/{001,003,009}`，当前生效路径）
+4. 回退 `tools/model_stub.py` 内置桩（接口与 api_doc.md §7 完全一致，含 `--selftest`；
+   仅当 009 未交付或上述路径均不存在时使用，桩训练产物视为开发期预验证）
 
 加载后校验 `OBS_DIM==68`、`ACT_DIM==2`（§6.1），不符拒绝启动。
-009 交付后：把 `model.py` 放到 `Session-1_A2/`（api_doc.md 同目录）并设置
-`MODEL_MODULE=D:\AllKindsofFiles\OfflinePractice_2026_Summer\Session-1_A2\model.py`，
-或直接拷进 003 根目录，**003 代码零改动**。桩文件届时删除。
+
+**注意**：桩与正式 model.py 层名不同（`trunk.*` vs `feature_net.*`），
+两者 checkpoint 不能互相 `--resume`；正式训练以 009 交付版为准，从零开始。
 
 ## 日志与 checkpoint
 

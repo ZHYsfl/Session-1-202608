@@ -8,7 +8,8 @@ models.py — 009 model.py 加载桥（进程内 import，api.md §1/§8）
 加载优先级（自上而下第一个成功即用）：
   1. 环境变量 MODEL_MODULE=<path>：显式指定 009 交付的 model.py 路径
   2. 当前目录/上级目录存在 model.py（如把 009 交付文件拷进 003 根目录）
-  3. 回退到 tools/model_stub.py 内置桩（开发期，接口与 api_doc.md §7 完全一致）
+  3. 同级 009/ 目录下的 model.py（默认三方协作目录布局：A2/{001,003,009}）
+  4. 回退到 tools/model_stub.py 内置桩（开发期，接口与 api_doc.md §7 完全一致）
 
 加载后校验 OBS_DIM / ACT_DIM 与协议一致（api.md §6.1）。
 """
@@ -48,7 +49,10 @@ def get_model_module():
         if p.exists():
             candidates.append(("本地 model.py", p))
             break
-    candidates.append(("内置桩", _STUB_PATH))  # 3) 回退桩
+    sibling_009 = Path(__file__).parent.parent / "009" / "model.py"  # 3) 同级 009/
+    if sibling_009.exists():
+        candidates.append(("同级 009/model.py", sibling_009))
+    candidates.append(("内置桩", _STUB_PATH))  # 4) 回退桩
 
     errors = []
     for label, path in candidates:
