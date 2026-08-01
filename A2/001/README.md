@@ -27,8 +27,10 @@ rl_chassis/
 ```powershell
 cd D:\webots_projects\rl_chassis
 uv venv .venv
-uv pip install --python .venv\Scripts\python.exe websockets numpy
+uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ```
+
+（依赖只有 numpy + websockets，详见 `requirements.txt`。`controller` 模块由 Webots 自带。）
 
 `controllers/env_server/runtime.ini` 已指向该虚拟环境的 python，
 Webots 启动控制器时会自动使用它（无需改动 Webots 全局设置）。
