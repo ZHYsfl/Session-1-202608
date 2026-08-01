@@ -44,6 +44,10 @@ R_GOAL_REACHED = 200.0          # 到达目标
 R_COLLISION = -200.0            # 碰撞
 R_TIME_STEP = -0.1              # 每步时间惩罚
 W_SMOOTH = 0.5                  # × (a − a_prev)²，动作平滑惩罚（v、w 各一份）
+# 密集障碍接近惩罚（run2 新增）：min(lidar) 进入 D_SAFE 内开始按深度线性惩罚，
+# 给"离碰撞还有多远"一个连续梯度——run1 纯稀疏 -200 无法告诉策略撞之前哪步开始错的。
+D_SAFE = 0.5                    # 危险区阈值（m）；> robot_radius 0.18，留出可回旋区间
+W_DANGER = 3.0                  # × max(0, D_SAFE − min(lidar))，每步；碰撞边界处约 0.96/步
 
 # ================= 训练流程（api.md §6.6 ~ §6.8） =================
 MAX_EPISODES = 2_000            # 训练 episode 上限（收敛会提前 break）

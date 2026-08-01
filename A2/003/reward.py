@@ -7,8 +7,8 @@ reward.py — 奖励函数（api.md §6.4）与 终止掩码（api.md §6.5）
 
 import numpy as np
 
-from config import (R_COLLISION, R_GOAL_REACHED, R_TIME_STEP,
-                    W_APPROACH, W_SMOOTH)
+from config import (D_SAFE, R_COLLISION, R_GOAL_REACHED, R_TIME_STEP,
+                    W_APPROACH, W_DANGER, W_SMOOTH)
 
 
 def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
@@ -20,6 +20,7 @@ def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
             + 200   (若 goal_reached)
             − 200   (若 collision)
             − 0.1                              # 时间惩罚，每步
+            − 3.0 × max(0, 0.5 − min(lidar_t)) # 障碍接近惩罚（run2 新增）
             − 0.5 × (a0 − a0_prev)² − 0.5 × (a1 − a1_prev)²   # 平滑惩罚
 
     参数：
@@ -37,6 +38,7 @@ def compute_reward(obs_prev: dict, a01: np.ndarray, a01_prev: np.ndarray,
     if obs_next["flags"]["collision"]:
         r += R_COLLISION
     r += R_TIME_STEP
+    r -= W_DANGER * max(0.0, D_SAFE - float(np.min(obs_next["lidar"])))
     r -= W_SMOOTH * (float(a01[0]) - float(a01_prev[0])) ** 2
     r -= W_SMOOTH * (float(a01[1]) - float(a01_prev[1])) ** 2
     return float(r)
