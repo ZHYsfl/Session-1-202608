@@ -425,10 +425,10 @@ DEF ROBOT Robot {
     # 教训：固定球脚撑的静摩擦会"锁死"车身、抢载导致轮子打滑；滚珠滚动阻力≈0
     BallJoint {
       jointParameters BallJointParameters {
-        anchor 0.1 0 0.03
+        anchor 0.1 0 0.025
       }
       endPoint Solid {
-        translation 0.1 0 0.03
+        translation 0.1 0 0.025
         children [
           Shape {
             appearance PBRAppearance {
@@ -451,10 +451,10 @@ DEF ROBOT Robot {
     }
     BallJoint {
       jointParameters BallJointParameters {
-        anchor -0.1 0 0.03
+        anchor -0.1 0 0.025
       }
       endPoint Solid {
-        translation -0.1 0 0.03
+        translation -0.1 0 0.025
         children [
           Shape {
             appearance PBRAppearance {
