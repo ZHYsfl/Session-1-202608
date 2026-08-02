@@ -43,7 +43,8 @@ from sac import SACAgent
 
 log = logging.getLogger("train")
 
-BUFFER_CAPACITY = 200_000     # api.md §6.3：replay buffer 容量
+BUFFER_CAPACITY = 500_000     # api.md §6.3：replay buffer 容量（08-02 起 50 万，
+                              # 与 train_async.py 一致；容纳 14.3 万演示 + 在线数据）
 WARMUP = 5_000                # api.md §6.3：buffer 少于 5000 条不更新
 BYE_TIMEOUT_S = 5.0           # api.md §2.5：等 bye 超时（秒）
 
