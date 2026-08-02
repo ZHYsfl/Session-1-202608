@@ -50,6 +50,12 @@ V_MAX = 0.5                 # m/s
 W_MAX = 1.5                 # rad/s
 GOAL_TOLERANCE = 0.15       # m
 ROBOT_RADIUS = 0.18         # m，碰撞判定半径（车身外接圆 ~0.170 + 余量）
+COLLISION_DIST = 0.28       # m，真机对齐（2026-08-02）：雷达 range_min=0.15m，
+                            # 0.18 判定太晚会真撞；0.28 留出惯性滑行余量
+MIN_LINEAR_VEL = 0.0        # m/s，真机对齐：后方是雷达盲区（车壳遮挡），禁止倒车
+# 模拟真机车壳遮挡扇区（车体角度，度，0=车头正前，逆时针）：该扇区读数屏蔽为
+# max_range。真机实测原始角度 115°~215° + offset -61.88° ≈ 车体 177°~277°。
+LIDAR_OCCLUDED_BODY = (177.0, 277.0)
 ARENA_SIZE = 4.0            # m
 OBS_DIM = 68
 ACT_DIM = 2
@@ -84,6 +90,8 @@ CONFIG_KEYS = {
     "w_max": W_MAX,
     "goal_tolerance": GOAL_TOLERANCE,
     "robot_radius": ROBOT_RADIUS,
+    "collision_dist": COLLISION_DIST,
+    "min_linear_vel": MIN_LINEAR_VEL,
     "arena_size": ARENA_SIZE,
 }
 OVERRIDABLE_KEYS = {"max_episode_time"}  # reset 的 config_override 唯一允许的键
@@ -339,8 +347,13 @@ class EnvServer:
 
         obs、碰撞判定、客户端奖励统一使用这份滤波后的扫描，保证全链路语义一致：
         尖峰既然是传感器伪影，就不该出现在任何下游消费者的输入里。
+        同时模拟真机车壳遮挡：LIDAR_OCCLUDED_BODY 扇区屏蔽为 max_range。
         """
-        return self._median3(self._read_lidar_raw()[self._lidar_index])
+        lid = self._median3(self._read_lidar_raw()[self._lidar_index])
+        i0 = int(LIDAR_OCCLUDED_BODY[0] / 360.0 * LIDAR_COUNT)
+        i1 = int(LIDAR_OCCLUDED_BODY[1] / 360.0 * LIDAR_COUNT)
+        lid[i0:i1] = LIDAR_MAX_RANGE
+        return lid
 
     def _pose(self):
         """返回 (x, y, yaw)，supervisor 真值。"""
@@ -452,7 +465,7 @@ class EnvServer:
 
     # ================= action（api.md §2.4 / §5.3） =================
     def step_action(self, v, w):
-        v = float(np.clip(v, -V_MAX, V_MAX))
+        v = float(np.clip(v, MIN_LINEAR_VEL, V_MAX))   # 真机对齐：禁止倒车
         w = float(np.clip(w, -W_MAX, W_MAX))
 
         # 理想运动学积分（无轮，api.md §5.3）：yaw += w·dt, pos += v·dt·(cos,sin)
@@ -485,7 +498,7 @@ class EnvServer:
             self.max_tilt = max(self.max_tilt, abs(pitch), abs(roll))
             if m_raw < 0.3 and self.spike_info is None:
                 self.spike_info = (m_raw, int(np.argmin(lid_raw)), pitch, roll)
-            if m < ROBOT_RADIUS:
+            if m < COLLISION_DIST:
                 collision = True
                 # DEBUG（几何审计）：碰撞瞬间的位姿 + 最短射线编号/角度/读数，
                 # 与 reset 时的场景布局对照，可离线复算该读数是否有实物对应；
