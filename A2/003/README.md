@@ -82,6 +82,24 @@ python train.py --episodes 2000
 课程学习默认开启（前 300 局 15 s 时限，之后放回 30 s，见 §2.2 config_override）；
 `--no-curriculum` 关闭。训练中途 Ctrl+C 会先发 `all_finish(interrupted)` 再退出（§2.5）。
 
+### 4. 真机物理小车微调（sim-to-real，08-02 起）
+
+以 Webots 仿真收敛权重（`checkpoints/ckpt_sim_best.pt`，来自
+`D:\webots_projects\rl_chassis\A2\003\checkpoints\final_best.pt`，episode 449 / update_step 68695）
+为起点，在真机（`A2/real_robot` server，manual-drive 模式）上继续训练：
+
+```bash
+cd /home/zane/session_1/A2/003 && uv run python train.py --uri ws://192.168.43.114:8765 --resume checkpoints/ckpt_sim_best.pt --warmup 256
+```
+
+要点：
+- 每局都是人工摆车（`record_goal` 摆目标点 → `drive_to_start` 遥控开到起点），
+  不要用 `--auto-human`（会跳过等待）。
+- `--warmup 256`：真机微调用仿真权重起步，critic 已训好，256 条经验即可开更，
+  避免默认 5000 步空转（真机每步都要人工 reset，成本高）。
+- 真机与仿真差异（雷达噪声、速度响应约 1.10x、转向动力学）由在线微调吸收，
+  初期 SAC 探索噪声大，注意安全，随时 Ctrl+C。
+
 ## 各模块 ↔ api.md 映射
 
 | api.md 章节 | 实现 | 说明 |
