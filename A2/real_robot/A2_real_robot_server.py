@@ -106,8 +106,17 @@ class RealRobotServer(Node):
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("lidar_front_offset_deg", args.lidar_front_offset_deg)
         self.declare_parameter("log_dir", str(args.log_dir))
+        self.declare_parameter("goal_mode", args.goal_mode)
+        self.declare_parameter("goal_relative_x", args.goal_relative_x)
+        self.declare_parameter("goal_relative_y", args.goal_relative_y)
 
         self.port = self.get_parameter("port").value
+        self.goal_mode = self.get_parameter("goal_mode").value
+        self.goal_relative = Pose2D(
+            self.get_parameter("goal_relative_x").value,
+            self.get_parameter("goal_relative_y").value,
+            0.0,
+        )
         self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").value
         self.scan_topic = self.get_parameter("scan_topic").value
         self.odom_topic = self.get_parameter("odom_topic").value
@@ -414,13 +423,39 @@ class RealRobotServer(Node):
         seed = msg.get("seed", -1)
         self._last_seed = seed
 
-        self.state = "RECORD_GOAL"
-        log.info("reset 收到，seed=%s，等待人工摆放目标点", seed)
-        self._send({
-            "type": "human",
-            "action": "record_goal",
-            "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')",
-        })
+        if self.goal_mode == "relative":
+            # 相对目标点模式：只需摆起点，goal 由 start + goal_relative 计算
+            self.state = "RECORD_START"
+            log.info("reset 收到，seed=%s，goal_mode=relative，"
+                     "goal=(%.2f, %.2f)，等待人工摆放起点",
+                     seed, self.goal_relative.x, self.goal_relative.y)
+            self._send({
+                "type": "human",
+                "action": "record_start",
+                "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
+            })
+        else:
+            # 手动模式：先摆目标点，再摆起点（两点间需用车轮移动，odom 才有效）
+            self.state = "RECORD_GOAL"
+            log.info("reset 收到，seed=%s，等待人工摆放目标点", seed)
+            self._send({
+                "type": "human",
+                "action": "record_goal",
+                "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')",
+            })
+
+    def _start_episode(self):
+        """从已记录的 start_abs 和 goal_abs 开始一局，发初始 obs。"""
+        self.episode_id += 1
+        self.step_id = 0
+        self.episode_t = 0.0
+        self.current_action = (0.0, 0.0)
+        self.state = "RUNNING"
+        log.info("episode %d 开始: start=(%.3f,%.3f) goal=(%.3f,%.3f)",
+                 self.episode_id, self.start_abs.x, self.start_abs.y,
+                 self.goal_abs.x, self.goal_abs.y)
+        obs = self._build_obs()
+        self._send(obs)
 
     def _handle_human_confirm(self, msg: dict):
         action = msg.get("action")
@@ -456,14 +491,15 @@ class RealRobotServer(Node):
             log.info("记录起点: x=%.3f y=%.3f yaw=%.3f",
                      current.x, current.y, current.yaw)
 
-            self.episode_id += 1
-            self.step_id = 0
-            self.episode_t = 0.0
-            self.current_action = (0.0, 0.0)
-            self.state = "RUNNING"
+            if self.goal_mode == "relative":
+                # 相对目标点：goal = start + goal_relative
+                self.goal_abs = Pose2D(
+                    self.start_abs.x + self.goal_relative.x,
+                    self.start_abs.y + self.goal_relative.y,
+                    self.start_abs.yaw,
+                )
 
-            obs = self._build_obs()
-            self._send(obs)
+            self._start_episode()
 
         else:
             self._error("BAD_FIELD", f"未知的 human_confirm action: {action}")

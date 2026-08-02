@@ -47,6 +47,21 @@ python3 ~/calibrate_lidar_front.py
 python3 ~/A2_real_robot_server.py --lidar-front-offset-deg <标定值>
 ```
 
+### 当前小车的标定值
+
+| 项目 | 值 |
+|---|---|
+| 雷达型号 | Delta-2G（杉川 3iRobotix） |
+| 标定日期 | 2026-08-02 |
+| `lidar_front_offset_deg` | **-61.88°** |
+| 含义 | 雷达原始 0° 偏左约 62°，车头正前对应雷达 -61.88° |
+
+因此本车启动命令固定为：
+
+```bash
+python3 ~/A2_real_robot_server.py --lidar-front-offset-deg -61.88
+```
+
 ## 人工介入流程
 
 ```text
