@@ -102,6 +102,8 @@ class RealRobotServer(Node):
         "w_max": 1.5,
         "goal_tolerance": 0.15,
         "robot_radius": 0.18,
+        "collision_dist": 0.28,   # 真机碰撞判定距离（m）：雷达 range_min=0.15m，
+                                  # 0.18 判定太晚会真撞上；0.28 留出惯性滑行余量
         "arena_size": 4.0,
     }
 
@@ -114,6 +116,8 @@ class RealRobotServer(Node):
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("lidar_front_offset_deg", args.lidar_front_offset_deg)
+        self.declare_parameter("lidar_occluded_deg", args.lidar_occluded_deg)
+        self.declare_parameter("min_linear_vel", args.min_linear_vel)
         self.declare_parameter("log_dir", str(args.log_dir))
         self.declare_parameter("goal_mode", args.goal_mode)
         self.declare_parameter("goal_relative_x", args.goal_relative_x)
@@ -131,6 +135,19 @@ class RealRobotServer(Node):
         self.odom_topic = self.get_parameter("odom_topic").value
         self.lidar_front_offset_rad = math.radians(
             self.get_parameter("lidar_front_offset_deg").value
+        )
+        # 车身遮挡扇区（雷达原始角度，度）：该角度内的读数被车身/外壳遮挡，
+        # 屏蔽为 max_range，避免碰撞误判与 obs 污染（2026-08-02 实测 120°~210°）。
+        # 注意：屏蔽后该方向对 RL 表现为"开阔"，因此必须配合 --min-linear-vel 0
+        # 禁止倒车，否则策略会倒向雷达盲区造成真碰撞。
+        occ = self.get_parameter("lidar_occluded_deg").value
+        if occ and "," in str(occ):
+            a0, a1 = (float(x) for x in str(occ).split(","))
+            self.lidar_occluded_rad = (math.radians(a0), math.radians(a1))
+        else:
+            self.lidar_occluded_rad = None
+        self.min_linear_vel = float(
+            self.get_parameter("min_linear_vel").value
         )
         self.log_dir = Path(self.get_parameter("log_dir").value).expanduser()
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -234,6 +251,14 @@ class RealRobotServer(Node):
 
         m = len(ranges)
         raw_angles = scan.angle_min + np.arange(m, dtype=np.float32) * scan.angle_increment
+        # 车身遮挡扇区（原始角度）：屏蔽为 max_range
+        if self.lidar_occluded_rad is not None:
+            a0, a1 = self.lidar_occluded_rad
+            if a0 <= a1:
+                mask = (raw_angles >= a0) & (raw_angles <= a1)
+            else:  # 跨 0°（如 350°~10°）
+                mask = (raw_angles >= a0) | (raw_angles <= a1)
+            ranges[mask] = max_range
         # 安装偏移：车头正前在 raw scan 中的角度 = offset
         # 因此 target=0 时应取 raw angle ≈ offset 的值
         raw_angles = raw_angles - self.lidar_front_offset_rad
@@ -310,7 +335,7 @@ class RealRobotServer(Node):
         done = False
 
         min_lidar = min(lidar)
-        if min_lidar < self.cfg["robot_radius"]:
+        if min_lidar < self.cfg["collision_dist"]:
             flags["collision"] = True
             done = True
         elif dist <= self.cfg["goal_tolerance"]:
@@ -340,6 +365,33 @@ class RealRobotServer(Node):
         twist.angular.z = float(w)
         self.cmd_vel_pub.publish(twist)
 
+    def _safety_clamp(self, v: float, w: float, safe_dist: float = 0.30) -> tuple:
+        """
+        遥控/动作安全保护：前方（车头 ±30°）障碍 < safe_dist 时禁止前进，
+        后方障碍 < safe_dist 时禁止后退。返回 clamped (v, w)。
+        雷达 range_min=0.15m，safe_dist 取 0.30 保证有刹车余量。
+        """
+        scan = self._get_latest_scan()
+        if scan is None or v == 0.0:
+            return v, w
+        try:
+            lidar = self._resample_lidar(scan)
+        except Exception:
+            return v, w
+        n = len(lidar)
+        if n == 0:
+            return v, w
+        arc = max(1, int(30.0 / 360.0 * n))          # ±30° 对应的线数
+        front = min(lidar[:arc] + lidar[n - arc:])   # index 0 = 车头正前
+        rear = min(lidar[n // 2 - arc:n // 2 + arc])
+        if v > 0 and front < safe_dist:
+            log.info("safety: 前方 %.2fm < %.2fm，禁止前进", front, safe_dist)
+            v = 0.0
+        if v < 0 and rear < safe_dist:
+            log.info("safety: 后方 %.2fm < %.2fm，禁止后退", rear, safe_dist)
+            v = 0.0
+        return v, w
+
     # ---------------- episode 推进 ----------------
     async def _run_step(self, v: float, w: float):
         """执行一个 control_dt，然后发 obs"""
@@ -361,7 +413,10 @@ class RealRobotServer(Node):
         if obs["done"]:
             self._log_episode(obs)
             self.state = "WAIT_RESET"
-            self._publish_cmd(0.0, 0.0)
+            # 连发几次零速刹车，抵消真实小车惯性
+            for _ in range(3):
+                self._publish_cmd(0.0, 0.0)
+                await asyncio.sleep(0.02)
 
         log.info("step timing: publish=%.3f sleep=%.3f build_obs=%.3f send=%.3f total=%.3f",
                  t1 - t0, t2 - t1, t3 - t2, t4 - t3, t4 - t0)
@@ -553,8 +608,9 @@ class RealRobotServer(Node):
             return
         v = float(msg.get("v", 0.0))
         w = float(msg.get("w", 0.0))
-        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        v = max(self.min_linear_vel, min(self.cfg["v_max"], v))
         w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
+        v, w = self._safety_clamp(v, w)
         log.info("teleop: v=%.3f w=%.3f", v, w)
         twist = Twist()
         twist.linear.x = float(v)
@@ -582,7 +638,7 @@ class RealRobotServer(Node):
 
         v = float(msg.get("v", 0.0))
         w = float(msg.get("w", 0.0))
-        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        v = max(self.min_linear_vel, min(self.cfg["v_max"], v))
         w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
 
         self._step_task = asyncio.create_task(self._run_step(v, w))
@@ -655,6 +711,15 @@ def main():
     parser.add_argument(
         "--lidar-front-offset-deg", type=float, default=0.0,
         help="雷达 0° 相对于车头正前的偏移（度）。正数表示车头正前在雷达原始 0° 的左侧"
+    )
+    parser.add_argument(
+        "--lidar-occluded-deg", type=str, default="115,215",
+        help="车身遮挡扇区（雷达原始角度范围，度，逗号分隔）：该角度的读数被车身遮挡，"
+             "屏蔽为 max_range。本车实测 120°~210° 为车壳，默认 115,215"
+    )
+    parser.add_argument(
+        "--min-linear-vel", type=float, default=0.0,
+        help="v 下界（m/s）。遮挡扇区屏蔽后倒车是雷达盲区，默认 0.0 禁止倒车"
     )
     parser.add_argument("--log-dir", type=Path, default=Path("~/a2_real_robot_logs"))
     parser.add_argument(
