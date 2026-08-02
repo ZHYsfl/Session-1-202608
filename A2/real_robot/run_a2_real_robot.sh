@@ -7,6 +7,10 @@ set -e
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
 
+# 与 start_app.service 启动的底盘节点保持一致
+export ROS_DOMAIN_ID=99
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
 # 1. 停止卖家 APP，避免 rplidar 节点抢串口
 if command -v APP >/dev/null 2>&1; then
     echo "停止 APP..."

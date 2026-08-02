@@ -56,9 +56,15 @@ async def async_input(prompt: str) -> str:
 
 
 async def recv_until_obs(ws, *, auto_actions: Optional[set] = None,
-                         prompt_prefix: str = "") -> dict:
+                         prompt_prefix: str = "",
+                         auto_confirm: bool = False) -> dict:
     """收消息直到拿到 obs；human 消息按规则处理。"""
     auto_actions = auto_actions or set()
+    if auto_confirm:
+        auto_actions = set(auto_actions)
+        auto_actions.add("record_start")
+        auto_actions.add("record_goal")
+        auto_actions.add("drive_to_start")
     while True:
         msg = await recv(ws)
         mtype = msg.get("type")
@@ -80,14 +86,16 @@ async def recv_until_obs(ws, *, auto_actions: Optional[set] = None,
         raise RuntimeError(f"收到意外消息: {msg}")
 
 
-async def calibrate_speed(ws, speed: float, cfg: dict, steps: int) -> dict:
+async def calibrate_speed(ws, speed: float, cfg: dict, steps: int,
+                          auto_confirm: bool = False) -> dict:
     """标定一个速度。返回 {"cmd": speed, "dist": m, "actual": m/s, "outcome": str}。"""
     dt = cfg["control_dt"]
 
     await send(ws, {"type": "reset", "seed": -1, "config_override": None})
     # 先摆车，车头朝前
     obs = await recv_until_obs(ws, auto_actions={"drive_to_start"},
-                               prompt_prefix=f"v={speed:.2f}: ")
+                               prompt_prefix=f"v={speed:.2f}: ",
+                               auto_confirm=auto_confirm)
     if obs.get("type") != "obs":
         raise RuntimeError(f"reset 后未收到 obs: {obs}")
 
@@ -141,10 +149,14 @@ async def main():
                     help="要标定的命令速度列表（m/s）")
     ap.add_argument("--steps", type=int, default=DEFAULT_STEPS,
                     help="每个速度跑多少步（每步 0.1s）")
+    ap.add_argument("--auto-confirm", action="store_true",
+                    help="自动确认所有 human 提示（标定时不需要人工按回车）")
     args = ap.parse_args()
 
     print("速度列表:", args.speeds)
     print(f"每速度跑 {args.steps * 0.1:.1f} 秒")
+    if args.auto_confirm:
+        print("自动确认模式：所有 human 提示会自动确认")
 
     results = []
     for speed in args.speeds:
@@ -155,7 +167,8 @@ async def main():
                 raise RuntimeError(f"首条消息不是 hello: {hello}")
             print(f"hello: {hello['env_name']} v{hello['protocol_version']}")
             cfg = hello["config"]
-            r = await calibrate_speed(ws, speed, cfg, args.steps)
+            r = await calibrate_speed(ws, speed, cfg, args.steps,
+                                      auto_confirm=args.auto_confirm)
             results.append(r)
 
     # 标定完成后礼貌关闭 server

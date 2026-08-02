@@ -154,6 +154,8 @@ class RealRobotServer(Node):
         self.latest_twist = (0.0, 0.0)  # (v, w)
         self.latest_scan_time = 0.0
         self.latest_odom_time = 0.0
+        self._scan_count = 0
+        self._odom_count = 0
 
         # 状态机
         # WAIT_RESET, RECORD_GOAL, DRIVE_TO_START, RECORD_START, RUNNING, FINISHED
@@ -183,6 +185,9 @@ class RealRobotServer(Node):
         with self._lock:
             self.latest_scan = msg
             self.latest_scan_time = time.time()
+        self._scan_count += 1
+        if self._scan_count % 10 == 0:
+            log.debug("scan callback #%d", self._scan_count)
 
     def _odom_callback(self, msg: Odometry):
         p = msg.pose.pose.position
@@ -193,6 +198,9 @@ class RealRobotServer(Node):
             self.latest_odom = Pose2D(p.x, p.y, yaw)
             self.latest_twist = (float(t.linear.x), float(t.angular.z))
             self.latest_odom_time = time.time()
+        self._odom_count += 1
+        if self._odom_count % 60 == 0:
+            log.debug("odom callback #%d", self._odom_count)
 
     # ---------------- 工具函数 ----------------
     def _send(self, msg: dict):
@@ -518,10 +526,17 @@ class RealRobotServer(Node):
                      current.x, current.y, current.yaw)
 
             if self.goal_mode == "relative":
-                # 相对目标点：goal = start + goal_relative
+                # 相对目标点：goal = start + R(yaw) * goal_relative
+                # goal_relative 是车体坐标（x 前，y 左），要旋转到世界坐标
+                cos_yaw = math.cos(self.start_abs.yaw)
+                sin_yaw = math.sin(self.start_abs.yaw)
                 self.goal_abs = Pose2D(
-                    self.start_abs.x + self.goal_relative.x,
-                    self.start_abs.y + self.goal_relative.y,
+                    self.start_abs.x
+                    + self.goal_relative.x * cos_yaw
+                    - self.goal_relative.y * sin_yaw,
+                    self.start_abs.y
+                    + self.goal_relative.x * sin_yaw
+                    + self.goal_relative.y * cos_yaw,
                     self.start_abs.yaw,
                 )
 
