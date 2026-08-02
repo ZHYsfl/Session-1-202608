@@ -1,0 +1,17 @@
+# 009 模型侧（model.py）独立忽略规则
+# 009 作为独立交付单元，可单独复制/分享，故自包含 Python 杂项；
+# 其余公共规则（IDE/OS）由 A2/.gitignore 兜底
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 本地自测产物
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 虚拟环境（009 无 requirements.txt，若本地建 venv 自测不入库）
+.venv/
+venv/

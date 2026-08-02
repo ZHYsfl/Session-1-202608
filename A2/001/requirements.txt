@@ -1,0 +1,10 @@
+# 001 仿真环境 Python 依赖（rl_chassis）
+#
+# 说明：
+#   - env_server.py / tools 里 import 的 `controller`（Supervisor）模块由 Webots 自带，
+#     不通过 pip 安装；运行本环境前请先安装 Webots（R2025a）。
+#   - 以下版本为 D:\webots_projects\rl_chassis\.venv 中端到端实测通过的版本
+#     （protocol_selftest 4/4 PASS、goal_reached 验证通过）。
+
+numpy==2.5.1
+websockets==17.0.1

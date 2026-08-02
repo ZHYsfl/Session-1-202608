@@ -1,0 +1,4 @@
+# 003 算法侧依赖（api.md §7.1：网络仅 torch + 标准库；本侧另需 websockets / numpy）
+numpy>=1.24
+torch>=2.0
+websockets>=14

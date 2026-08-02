@@ -1,0 +1,18 @@
+# 003 算法侧（SAC 训练/推理主循环）特有忽略规则
+# README 约定：logs/ 与 checkpoints/ 均为运行时生成（train.py 自动 mkdir），不入库
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 虚拟环境（uv 生成的 .venv 内含自动 .gitignore，此处显式声明以防重建时遗漏）
+.venv/
+venv/
+
+# 训练运行时产物：日志（train.log / episodes.csv / eval.csv / 实验子目录）
+logs/
+
+# 训练产物：checkpoint（ckpt_{ep_N,best,final}.pt，可 --resume 恢复，体积随训练增长）
+# 如需分享已收敛模型，用 `git add -f checkpoints/...` 强制添加
+checkpoints/
