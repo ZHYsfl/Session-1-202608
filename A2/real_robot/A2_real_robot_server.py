@@ -391,7 +391,14 @@ class RealRobotServer(Node):
             "config": self.cfg,
         })
 
-    def _handle_reset(self, msg: dict):
+    async def _wait_for_odom(self, timeout: float = 1.5):
+        """等待收到 /odom，最多 timeout 秒。"""
+        deadline = time.time() + timeout
+        while self._get_current_pose() is None and time.time() < deadline:
+            await asyncio.sleep(0.05)
+        return self._get_current_pose() is not None
+
+    async def _handle_reset(self, msg: dict):
         if self.state not in ("WAIT_RESET", "FINISHED"):
             self._error("WRONG_STATE",
                         f"reset 只能在 WAIT_RESET/FINISHED 状态发，当前 {self.state}")
@@ -412,6 +419,11 @@ class RealRobotServer(Node):
 
         seed = msg.get("seed", -1)
         self._last_seed = seed
+
+        # 等待 /odom 就绪，避免用户秒回 human_confirm 时 current 为 None
+        if not await self._wait_for_odom(timeout=1.5):
+            self._error("INTERNAL", "等待 1.5s 仍未收到 /odom")
+            return
 
         if self.goal_mode == "manual-drive":
             # manual-drive：先摆目标点，再推车/开车到起点（odom 记录位移）
