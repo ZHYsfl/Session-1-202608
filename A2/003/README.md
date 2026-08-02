@@ -95,6 +95,9 @@ cd /home/zane/session_1/A2/003 && uv run python train.py --uri ws://192.168.43.1
 要点：
 - 每局都是人工摆车（`record_goal` 摆目标点 → `drive_to_start` 遥控开到起点），
   不要用 `--auto-human`（会跳过等待）。
+- `drive_to_start` 阶段已内嵌键盘遥控（08-02）：收到提示后直接在训练终端按
+  W/S 前进后退、A/D 左右转、空格停止、Q 结束遥控，无需第二个终端
+  （通过 server 的 teleop 消息驱动，不依赖 Pi 上的 ROS 环境）。
 - `--warmup 256`：真机微调用仿真权重起步，critic 已训好，256 条经验即可开更，
   避免默认 5000 步空转（真机每步都要人工 reset，成本高）。
 - 真机与仿真差异（雷达噪声、速度响应约 1.10x、转向动力学）由在线微调吸收，
