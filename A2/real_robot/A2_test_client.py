@@ -27,8 +27,10 @@ except ImportError:
     from websockets import connect
 
 
-def prompt(msg: str):
-    input(f"\n>>> {msg}\n按回车继续...")
+async def prompt(msg: str):
+    await asyncio.get_event_loop().run_in_executor(
+        None, input, f"\n>>> {msg}\n按回车继续..."
+    )
 
 
 async def recv(ws) -> dict:
@@ -48,7 +50,7 @@ async def main():
     uri = sys.argv[1] if len(sys.argv) > 1 else "ws://127.0.0.1:8765"
     print(f"连接 {uri} ...")
 
-    async with connect(uri) as ws:
+    async with connect(uri, ping_interval=None, ping_timeout=None) as ws:
         hello = await recv(ws)
         cfg = hello["config"]
 
@@ -58,13 +60,13 @@ async def main():
         # record goal
         msg = await recv(ws)
         assert msg["type"] == "human" and msg["action"] == "record_goal"
-        prompt("现在把车放到目标点")
+        await prompt("现在把车放到目标点")
         await send(ws, {"type": "human_confirm", "action": "record_goal"})
 
         # record start
         msg = await recv(ws)
         assert msg["type"] == "human" and msg["action"] == "record_start"
-        prompt("现在把车放到起点")
+        await prompt("现在把车放到起点")
         await send(ws, {"type": "human_confirm", "action": "record_start"})
 
         # 初始 obs

@@ -31,5 +31,10 @@ if ! pgrep -f "delta2g_scan_node.py" >/dev/null; then
 fi
 
 # 4. 启动 A2 WebSocket server
-echo "启动 A2 真机 WebSocket server..."
-python3 ~/A2_real_robot_server.py "$@"
+# 默认 manual-drive 训练模式，已标定的 lidar 偏移
+LIDAR_OFFSET="-61.88"
+echo "启动 A2 真机 WebSocket server (goal_mode=manual-drive, lidar_offset=${LIDAR_OFFSET})..."
+python3 ~/A2_real_robot_server.py \
+    --lidar-front-offset-deg ${LIDAR_OFFSET} \
+    --goal-mode manual-drive \
+    "$@"

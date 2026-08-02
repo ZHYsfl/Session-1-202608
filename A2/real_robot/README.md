@@ -70,15 +70,16 @@ server 回 human(record_goal)
   ↓ 人把车摆到目标点
 client 发 human_confirm(record_goal)
 server 回 human(drive_to_start)
-  ↓ 人把车推到/开到起点（可任意旋转朝向）
+  ↓ 人用键盘遥控把车开到起点（可任意旋转朝向）
 client 发 human_confirm(drive_to_start)
 server 回 obs(step_id=0)
   ↓ 进入 action ↔ obs 循环
 ```
 
-**注意**：小车只能靠车轮移动让 /odom 更新位置。人手把车搬到目标点或起点，
-/odom 不会更新，导致 goal 与 start 重合。因此必须先摆目标点，再**推车/开车**
-到起点。
+**注意**：
+- 人手把车搬到目标点或起点，/odom 不会更新，导致 goal 与 start 重合。
+- 因此必须用**键盘遥控或程序控制**把车从目标点开到起点。
+- 遥控脚本见 [`teleop_keyboard.py`](teleop_keyboard.py)。
 
 ## 源码同步（重要）
 

@@ -279,10 +279,12 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | type | string | 固定 "human" |
-| action | string | 当前需要人工执行的动作，目前定义：`record_goal`（记录目标点）、`record_start`（记录起点） |
+| action | string | 当前需要人工执行的动作，目前定义：`record_goal`（记录目标点）、`drive_to_start`（把车遥控开到起点）、`record_start`（记录起点） |
 | detail | string | 可读的线下操作提示 |
 
 client（003 或任何人工操作客户端）收到后应**阻塞等待线下人员完成操作**，再回复对应的 `human_confirm`。训练脚本里可以把 detail 打印到屏幕或播放提示音。
+
+**遥控开车到起点**：真机 `/odom` 由车轮编码器积分得到，只能跟踪车轮移动，不能跟踪人手搬车。因此必须先摆目标点，再遥控开车到起点，让 odom 记录真实位移。若两点间靠手搬，goal 与 start 的 odom 坐标会重合，导致 `goal_reached` 立即触发。
 
 ### 2.9 human_confirm（client → server）【真机扩展】
 
@@ -314,7 +316,7 @@ WAIT_RESET ──收到 all_finish──▶ 发 bye ──▶ 关闭
 其余消息 → 回 error 并退出
 ```
 
-**真机模式补充**：`reset` 后 server 先进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `RECORD_START`，发送 `human(record_start)`；收到 `human_confirm(record_start)` 后才进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
+**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
 
 ### 3.2 完整时序
 
@@ -375,8 +377,8 @@ client(003/人工客户端)              server(真机 001-replacement)
    │◀──── human(record_goal) ──────│  提示：把车放到目标点
    │      （线下摆车）              │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 goal
-   │◀──── human(record_start) ─────│  提示：把车放到起点
-   │      （线下摆车）              │
+   │◀──── human(drive_to_start) ─────│  提示：把车遥控开到起点
+   │      （线下遥控开车，可旋转）  │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 start
    │◀──────── obs(ep=1, s=0) ──────│  开始这一局
    │──── action(ep=1, s=0) ───────▶│
@@ -386,7 +388,8 @@ client(003/人工客户端)              server(真机 001-replacement)
 **关键说明**：
 - 真机 server 的 `hello.env_name` 为 `"real_diffbot_v1"`，与 Webots 的 `"webots_diffbot_v1"` 区分；`protocol_version` 仍为 `1.1`，`config` 与仿真一致，保证 003/009 的校验逻辑不变。
 - `human` / `human_confirm` 是 001 真机侧的扩展消息。Webots 仿真 server 不发这两种消息；003 在收到时应判断：若 `type == "human"`，则暂停并提示线下操作，操作完成后再发 `human_confirm`。
-- 目标点与起点均通过当前 `/odom` 位姿记录，因此每次 `record_start` 后车实际所在位置即被 server 视为坐标原点，后续 `goal.dist` / `goal.bearing` 均相对该起点计算。
+- 遥控开车要求：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；若手搬，goal 与 start 的 odom 坐标重合，会导致 `goal_reached` 在 step 0 触发。
+- 目标点与起点均通过当前 `/odom` 位姿记录，后续 `goal.dist` / `goal.bearing` 均相对起点计算。
 
 ---
 
@@ -463,12 +466,13 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 
 真机 server 与 Webots 仿真的差异点：
 
-1. **传感器来源**：`lidar[64]` 由 `/scan`（Delta-2G，288 点/圈，约 6.7 Hz）重采样而来；`vel{v,w}` 取自 `/odom.twist`；`goal` 由 `record_goal` 时记录的 `/odom` 位姿与当前 `/odom` 位姿相减得到。
+1. **传感器来源**：`lidar[64]` 由 `/scan`（Delta-2G，288 点/圈，约 6.7 Hz）重采样而来；`vel{v,w}` 取自 `/odom.twist`；`goal` 由 `record_goal` 时记录的 `/odom` 位姿与 `drive_to_start` 时记录的 `/odom` 位姿相减得到。
 2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。
 3. **重采样与中位数滤波**：288 点按角度最近邻重采样为 64 线；对 64 线结果做 3 邻域环形中位数滤波；`inf`/无效值替换为 `lidar_max_range`。
 4. **动作执行**：收到 `(v,w)` 后 clip 到 `±v_max/±w_max`，以 50 Hz 向 `/cmd_vel` 发布 Twist，持续 `control_dt=0.1 s`，然后读取最新传感器数据并回 `obs`。
-5. **坐标系约定**：`record_start` 时把车所在位置视为该 episode 的局部坐标原点；目标点坐标为 `record_goal` 时的 `/odom` 位姿。因此 episode 内 `goal.dist` / `goal.bearing` 均相对于起点计算，依赖 `/odom` 的短时精度。
-6. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免串口冲突。见 `run_a2_real_robot.sh`。
+5. **坐标系约定**：`drive_to_start` 时把车所在位置视为该 episode 的局部坐标原点；目标点坐标为 `record_goal` 时的 `/odom` 位姿。因此 episode 内 `goal.dist` / `goal.bearing` 均相对于起点计算，依赖 `/odom` 的短时精度。
+6. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
+7. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免串口冲突。见 `run_a2_real_robot.sh`。
 
 ---
 

@@ -488,7 +488,7 @@ class RealRobotServer(Node):
                 self._send({
                     "type": "human",
                     "action": "drive_to_start",
-                    "detail": "请把车推到/开到起点（可以任意旋转朝向），到位后发送 human_confirm('drive_to_start')",
+                    "detail": "请用键盘遥控把车开到起点（可以任意旋转朝向），到位后发送 human_confirm('drive_to_start')",
                 })
             else:
                 self.state = "RECORD_START"
@@ -507,8 +507,17 @@ class RealRobotServer(Node):
                 self._error("INTERNAL", "尚未收到 /odom，无法记录起点")
                 return
             self.start_abs = Pose2D(current.x, current.y, current.yaw)
-            log.info("记录起点: x=%.3f y=%.3f yaw=%.3f",
-                     current.x, current.y, current.yaw)
+            dx = self.start_abs.x - self.goal_abs.x
+            dy = self.start_abs.y - self.goal_abs.y
+            dist = math.hypot(dx, dy)
+            log.info("记录起点: x=%.3f y=%.3f yaw=%.3f (距目标 %.3fm)",
+                     current.x, current.y, current.yaw, dist)
+            if dist < 0.3:
+                self._send({
+                    "type": "human",
+                    "action": "drive_to_start",
+                    "detail": f"警告：起点距目标只有 {dist:.2f}m，请继续把车开远一些，到位后再发送 human_confirm('drive_to_start')",
+                })
             self._start_episode()
 
         elif action == "record_start":
@@ -535,6 +544,22 @@ class RealRobotServer(Node):
 
         else:
             self._error("BAD_FIELD", f"未知的 human_confirm action: {action}")
+
+    def _handle_teleop(self, msg: dict):
+        """DRIVE_TO_START 阶段遥控：直接发布 /cmd_vel。"""
+        if self.state != "DRIVE_TO_START":
+            self._error("WRONG_STATE",
+                        f"teleop 只能在 DRIVE_TO_START 状态发，当前 {self.state}")
+            return
+        v = float(msg.get("v", 0.0))
+        w = float(msg.get("w", 0.0))
+        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
+        log.info("teleop: v=%.3f w=%.3f", v, w)
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
 
     def _handle_action(self, msg: dict):
         if self.state != "RUNNING":
@@ -582,6 +607,8 @@ class RealRobotServer(Node):
             self._handle_reset(msg)
         elif mtype == "action":
             self._handle_action(msg)
+        elif mtype == "teleop":
+            self._handle_teleop(msg)
         elif mtype == "all_finish":
             self._handle_all_finish(msg)
         elif mtype == "human_confirm":
@@ -614,7 +641,10 @@ class RealRobotServer(Node):
 
     async def run_server(self):
         log.info("启动 WebSocket server: 0.0.0.0:%d", self.port)
-        async with websockets.serve(self._ws_handler, "0.0.0.0", self.port):
+        async with websockets.serve(
+            self._ws_handler, "0.0.0.0", self.port,
+            ping_interval=None, ping_timeout=None,
+        ):
             await self._stop_event.wait()  # 等待退出信号
 
 
