@@ -521,6 +521,14 @@ class RealRobotServer(Node):
                  self.goal_abs.x, self.goal_abs.y)
         obs = self._build_obs()
         self._send(obs)
+        # 初始 obs 也可能 done（如起点紧贴障碍）：与 _run_step 一致的收尾，
+        # 否则 state 停在 RUNNING，client 发 reset 会报 WRONG_STATE
+        if obs["done"]:
+            self._log_episode(obs)
+            self.state = "WAIT_RESET"
+            for _ in range(3):
+                self._publish_cmd(0.0, 0.0)
+                time.sleep(0.02)
 
     def _handle_human_confirm(self, msg: dict):
         action = msg.get("action")
