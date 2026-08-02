@@ -588,7 +588,7 @@ class RealRobotServer(Node):
 
         mtype = msg.get("type")
         if mtype == "reset":
-            self._handle_reset(msg)
+            await self._handle_reset(msg)
         elif mtype == "action":
             self._handle_action(msg)
         elif mtype == "teleop":
