@@ -342,7 +342,7 @@ async def amain(args) -> int:
                                                     r["outcome"], r["success"])
 
                     # ---- 局后更新：K = 本 episode 步数（§3.3，约 1:1 更新比）----
-                    if len(buffer) >= WARMUP:
+                    if len(buffer) >= args.warmup:
                         loss_acc = {}
                         for _ in range(steps):
                             loss = agent.update(buffer)
@@ -362,8 +362,9 @@ async def amain(args) -> int:
                                 len(buffer))
                     else:
                         log.info("ep %4d | %-12s | steps=%3d | return=%8.2f | "
-                                 "buffer=%d（warmup 中）",
-                                 episode, outcome, steps, ret, len(buffer))
+                                 "buffer=%d（warmup 中，需 ≥%d）",
+                                 episode, outcome, steps, ret, len(buffer),
+                                 args.warmup)
 
                     elog.log_episode(episode, steps, ret, outcome, success)
 
@@ -474,6 +475,8 @@ def parse_args(argv=None):
     # 真机模式（api.md §2.8 / §2.9）：自动回复 human_confirm，不暂停等人工
     ap.add_argument("--auto-human", action="store_true",
                     help="真机模式下自动发送 human_confirm，不暂停等线下操作（调试用）")
+    ap.add_argument("--warmup", type=int, default=WARMUP,
+                    help="buffer 少于该条数不做梯度更新（真机微调建议调小，如 256）")
     return ap.parse_args(argv)
 
 
