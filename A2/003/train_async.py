@@ -26,6 +26,7 @@ import logging
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from enum import Enum
 from pathlib import Path
 
 import numpy as np
@@ -71,6 +72,11 @@ class LockedAgent:
 
 
 # ---------------- 跨协程共享计数器 ----------------
+class FinishReason:
+    """worker 退出时发送的 all_finish reason（由 eval_scheduler 在收敛时置位）。"""
+    value = "interrupted"
+
+
 class Counters:
     def __init__(self, start_episode: int):
         self.episodes = start_episode   # 已完成的训练局（聚合，跨 worker）
@@ -101,7 +107,7 @@ async def learner_task(agent: LockedAgent, buffer, counters: Counters,
 async def worker(idx: int, uri: str, args, agent: LockedAgent, buffer,
                  counters: Counters, gate: asyncio.Event,
                  stop_event: asyncio.Event, holder: list,
-                 elog: T.EpisodeLogger):
+                 elog: T.EpisodeLogger, finish_reason: FinishReason):
     try:
         ws = await T.connect(uri, ping_interval=PING_INTERVAL,
                              ping_timeout=PING_TIMEOUT)
@@ -141,13 +147,16 @@ async def worker(idx: int, uri: str, args, agent: LockedAgent, buffer,
                          idx, episode, r["outcome"], r["steps"], r["return_"],
                          len(buffer),
                          counters.steps_collected - counters.updates_done)
+        # 在自己连接的 server 上礼貌道别（§2.5）；此刻本连接无并发消息
+        await T.send_all_finish(ws, finish_reason.value, counters.total_resets)
 
 
 # ---------------- 评估调度：每 eval_interval 局评估一次 ----------------
 async def eval_scheduler(args, agent: LockedAgent, models, model_mod,
                          counters: Counters, gate: asyncio.Event,
                          stop_event: asyncio.Event, holder: list,
-                         evlog: T.EvalLogger) -> bool:
+                         evlog: T.EvalLogger,
+                         finish_reason: FinishReason) -> bool:
     best_rate = -1.0
     converge_streak = 0
     start = args.resume_episode + 1
@@ -191,6 +200,7 @@ async def eval_scheduler(args, agent: LockedAgent, models, model_mod,
             log.info("收敛：连续 %d 次评估 ≥%.0f%%（@ep%d）",
                      args.converge_consecutive, 100 * args.converge_rate,
                      target - 1)
+            finish_reason.value = "converged"
             stop_event.set()
             return True
         target += args.eval_interval
@@ -248,6 +258,7 @@ async def amain(args) -> int:
     gate = asyncio.Event()
     gate.set()
     stop_event = asyncio.Event()
+    finish_reason = FinishReason()
     holder: list = [None] * args.workers
 
     elog = T.EpisodeLogger(Path(args.log_dir))
@@ -257,13 +268,13 @@ async def amain(args) -> int:
     uris = [f"ws://{args.host}:{args.base_port + i}" for i in range(args.workers)]
     workers = [asyncio.create_task(worker(i, uris[i], args, agent, buffer,
                                           counters, gate, stop_event, holder,
-                                          elog))
+                                          elog, finish_reason))
                for i in range(args.workers)]
     learner = asyncio.create_task(learner_task(agent, buffer, counters,
                                                stop_event))
     evaler = asyncio.create_task(eval_scheduler(args, agent, models, model_mod,
                                                 counters, gate, stop_event,
-                                                holder, evlog))
+                                                holder, evlog, finish_reason))
 
     try:
         await asyncio.gather(*workers)
@@ -275,13 +286,6 @@ async def amain(args) -> int:
         stop_event.set()
         await learner
         raise
-    finally:
-        # 向所有 server 礼貌道别（best effort）
-        for h in holder:
-            if h is not None:
-                await T.send_all_finish(h["ws"], "converged" if converged
-                                        else "interrupted",
-                                        counters.total_resets)
     log.info("训练结束：episodes=%d updates=%d 收敛=%s",
              counters.episodes, counters.updates_done, converged)
     return 0 if converged else 1
