@@ -4,7 +4,7 @@
 #   RESUME_CKPT 非空时：--resume 该权重且不预填专家数据（奖励已改动时用）
 set -u
 EPISODES="${1:-2000}"
-CONVERGE_MIN="${2:-900}"
+CONVERGE_MIN="${2:-0}"
 RESUME="${3:-}"
 shift 3 2>/dev/null || true
 WEBOTS="/mnt/d/Program Files/Webots/msys64/mingw64/bin/webots.exe"

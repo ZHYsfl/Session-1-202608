@@ -1,47 +1,50 @@
 #!/bin/bash
-# 一键：启动 N 个 Webots 仿真实例 + 异步 RL 训练（从 0 权重 + 专家数据预填）
-# 用法：bash run_sim_async.sh [WORKERS] [EPISODES]
+# 一键：全 Python 异步 RL（N 个 pysim 采集实例 + 1 个 pysim 专职评估实例）
+# 2026-08-02 晚重写：弃用多 Webots 实例（卡死），场景本身是理想运动学+
+# 解析雷达，pysim_server.py 与 env_server 协议/物理对齐，吞吐高一个量级。
+#
+# 用法：
+#   bash run_sim_async.sh [WORKERS] [EPISODES] [RESUME]
+#     WORKERS   采集实例数（默认 12）
+#     EPISODES  训练局数上限（默认 2000）
+#     RESUME    非空则从该 checkpoint 恢复（不预填专家数据）
 set -u
-WORKERS="${1:-4}"
+WORKERS="${1:-12}"
 EPISODES="${2:-2000}"
-WEBOTS="/mnt/d/Program Files/Webots/msys64/mingw64/bin/webots.exe"
-WORLD='D:\webots_projects\rl_chassis\worlds\rl_arena.wbt'
+RESUME="${3:-}"
 BASE=8765
+EVAL_PORT=8873
+DIR=/home/zane/session_1/A2/003
 
 cleanup() {
-    powershell.exe -Command "Get-Process webots -EA SilentlyContinue | Stop-Process -Force; \
-        \$c = netstat -ano | Select-String ':876[5-9]'; if (\$c) { \$c | ForEach-Object { \
-        \$p = (\$_ -split '\s+')[-1]; Stop-Process -Id \$p -Force -EA SilentlyContinue } }" 2>/dev/null
-    sleep 2
+    pkill -f "tools/pysim_server.py" 2>/dev/null
+    sleep 1
 }
 
 cleanup
 
-# 启动 WORKERS 个 Webots 实例（端口 8765+i）
-echo "[async] starting $WORKERS webots instances (ports $BASE..$((BASE+WORKERS-1)))..."
+echo "[async] starting $WORKERS pysim collectors (ports $BASE..$((BASE+WORKERS-1))) + eval :$EVAL_PORT"
+cd "$DIR"
 for i in $(seq 0 $((WORKERS-1))); do
-    p=$((BASE + i))
-    (WSLENV=ENV_WS_PORT:ENV_WS_HOST ENV_WS_PORT="$p" ENV_WS_HOST=0.0.0.0 \
-        "$WEBOTS" --batch --mode=fast --stdout --stderr "$WORLD" > "/tmp/webots_w${i}.log" 2>&1) &
+    (uv run python tools/pysim_server.py --port $((BASE+i)) > "/tmp/pysim_w${i}.log" 2>&1) &
 done
-echo "[async] waiting 35s for instances to boot..."
-sleep 35
+(uv run python tools/pysim_server.py --port "$EVAL_PORT" > "/tmp/pysim_eval.log" 2>&1) &
+sleep 3
 
-# 确认各端口都在监听
-for i in $(seq 0 $((WORKERS-1))); do
-    p=$((BASE + i))
-    cnt=$(powershell.exe -Command "netstat -ano | Select-String ':$p '" 2>/dev/null | grep -c LISTENING)
-    echo "[async] port $p: $cnt listener(s)"
-done
-
-# 异步训练：从 0 权重（无 --resume），预填新专家数据
-cd /home/zane/session_1/A2/003
-echo "[async] train_async.py --workers $WORKERS --episodes $EPISODES --preload data/expert_v2.npz"
-uv run python train_async.py --workers "$WORKERS" --episodes "$EPISODES" \
-    --preload data/expert_v2.npz \
-    --log-dir logs/run_v2 --save-dir checkpoints/run_v2
+COMMON="--workers $WORKERS --base-port $BASE --eval-uri ws://127.0.0.1:$EVAL_PORT \
+    --episodes $EPISODES --no-curriculum \
+    --log-dir logs/run_pysim --save-dir checkpoints/run_pysim"
+if [ -n "$RESUME" ]; then
+    echo "[async] resume from $RESUME"
+    # shellcheck disable=SC2086
+    uv run python train_async.py $COMMON --resume "$RESUME"
+else
+    echo "[async] from scratch + preload data/expert_v4.npz"
+    # shellcheck disable=SC2086
+    uv run python train_async.py $COMMON --preload data/expert_v4.npz
+fi
 RC=$?
 
-echo "[async] done (rc=$RC), closing webots..."
-powershell.exe -Command "Get-Process webots -EA SilentlyContinue | Stop-Process -Force" 2>/dev/null
+echo "[async] done (rc=$RC), closing pysim instances..."
+cleanup
 exit $RC

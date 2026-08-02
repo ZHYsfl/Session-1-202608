@@ -67,7 +67,7 @@ WHEEL_TRACK = 0.20          # L
 # reset 采样约束（api.md §5.2）
 START_GOAL_MIN_DIST = 2.0   # 起点-目标最小间距
 SAMPLE_CLEARANCE = 0.4      # 起点/目标距障碍物表面的最小距离
-OBSTACLE_GAP = 0.55         # 障碍物表面之间的最小距离；需 > 车身直径 0.36 才过得去
+OBSTACLE_GAP = 0.60         # 障碍物表面之间的最小距离；= 2×死局检查膨胀半径，保证可通行通道
 ROBOT_SAMPLE_LIM = 1.6      # 起点/目标采样范围 [-1.6, 1.6]^2
 OBSTACLE_POS_LIM = 1.5      # 障碍物中心采样范围
 MIN_ACTIVE = 5              # 每局激活障碍物数量区间 [MIN_ACTIVE, MAX_ACTIVE]
@@ -395,19 +395,14 @@ class EnvServer:
         if config_override is not None:
             self.max_episode_time = float(config_override["max_episode_time"])
 
-        # 服务端课程学习（2026-08-02）：按 reset 次数分阶段，障碍由少到多、目标由近到远
-        self.reset_count = getattr(self, "reset_count", 0) + 1
-        rc = self.reset_count
-        if rc < 300:
-            cur_min_act, cur_max_act, cur_min_dist = 2, 4, 1.0
-        elif rc < 600:
-            cur_min_act, cur_max_act, cur_min_dist = 3, 5, 1.5
-        else:
-            cur_min_act, cur_max_act, cur_min_dist = MIN_ACTIVE, MAX_ACTIVE, START_GOAL_MIN_DIST
+        # 固定难场景（2026-08-02 晚：用户决定不用课程学习，保持最初场景配置）
+        cur_min_act, cur_max_act, cur_min_dist = MIN_ACTIVE, MAX_ACTIVE, START_GOAL_MIN_DIST
 
         # 场景生成：最多 200 次尝试，每次摆完障碍后做起点→目标栅格可达性检查，
-        # 不可达（死局，禁止倒车后无解）就整体重采样（2026-08-02 修复）
+        # 不可达（死局，禁止倒车后无解）就整体重采样（2026-08-02 修复：
+        # 墙也参与膨胀 + 膨胀半径 0.30，排除"障碍贴墙窄缝"被误判可达的死局）
         placed = []  # (x, y, r)
+        deadlock_resamples = 0
         for _ in range(200):
             # 1) 采起点与目标（间距 >= 课程阶段目标距离）
             sx, sy = self.rng.uniform(-ROBOT_SAMPLE_LIM, ROBOT_SAMPLE_LIM, 2)
@@ -448,7 +443,12 @@ class EnvServer:
             if self._is_reachable(sx, sy, gx, gy, placed):
                 break
             # 不可达：清理本轮放置（下一轮会重写所有障碍位置）
+            deadlock_resamples += 1
             placed = []
+        if deadlock_resamples:
+            print(f"[env_server] 死局重采样 {deadlock_resamples} 次后生成布局", flush=True)
+        if not placed:
+            print(f"[env_server] 警告: 200 次采样未通过死局检查，本轮退化为无障碍场景", flush=True)
 
         # 4) 传送机器人到起点，随机朝向
         self.tf_translation.setSFVec3f([float(sx), float(sy), 0.0])
@@ -479,10 +479,12 @@ class EnvServer:
 
     @staticmethod
     def _is_reachable(sx, sy, gx, gy, placed,
-                      res: float = 0.1, inflate: float = 0.25) -> bool:
+                      res: float = 0.1, inflate: float = 0.30) -> bool:
         """
         栅格 BFS 死局检查：起点→目标是否存在可行路径。
-        障碍物按圆处理并膨胀 inflate（车身半径 0.18 + 余量），
+        障碍物按圆处理并膨胀 inflate（车身半径 0.18 + 机动余量 0.12）；
+        围墙同样向内膨胀 inflate 参与占据——否则障碍贴墙留 0.2m 级窄缝时
+        BFS 误判可达，实际 0.36m 直径的车过不去（2026-08-02 晚修复）。
         4×4 m 场地 0.1 m 栅格 = 41×41，BFS 开销可忽略。
         """
         half = ARENA_SIZE / 2.0
@@ -498,6 +500,12 @@ class EnvServer:
             ys = np.arange(j0, j1 + 1) * res - half + res / 2
             xx, yy = np.meshgrid(xs, ys, indexing="ij")
             occ[i0:i1 + 1, j0:j1 + 1] |= ((xx - px) ** 2 + (yy - py) ** 2) < rr
+        # 围墙内缩 inflate 画进占据图（墙也是碰撞体，与障碍同膨胀）
+        m = max(1, int(round(inflate / res)))
+        occ[:m, :] = True
+        occ[-m:, :] = True
+        occ[:, :m] = True
+        occ[:, -m:] = True
         si, sj = int((sx + half) / res), int((sy + half) / res)
         gi, gj = int((gx + half) / res), int((gy + half) / res)
         if not (0 <= si < n and 0 <= sj < n and 0 <= gi < n and 0 <= gj < n):

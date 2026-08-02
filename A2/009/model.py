@@ -30,43 +30,10 @@ import torch.nn.functional as F  # noqa: F401 — 预留给 003 算法侧使用
 # 后续切换真机硬件：仅需修改本节常量，网络推理逻辑不动。
 # 真机若更换雷达/超声波阵列，修改 OBS_DIM 对应的 lidar_count 即可。
 # ============================================================================
-OBS_DIM: int = 132         # 网络输入维度 = 128(2帧雷达堆叠) + 2(goal) + 2(vel)
-ACT_DIM: int = 2           # 网络输出动作维度 = (v, w)
-LIDAR_COUNT: int = 64      # 单帧雷达线数
-LIDAR_STACK: int = 2       # 帧堆叠帧数（给网络"趋势感"）
-LOG_STD_MIN: float = -5.0  # log 标准差下界（防止方差坍缩为 0）
-LOG_STD_MAX: float = 2.0   # log 标准差上界（防止方差爆炸）
-
-
-# ============================================================================
-# LidarEncoder — 1D-CNN 雷达编码器（2026-08-02 引入）
-# 64 线雷达是 1D 环形空间信号：CNN 能提取"前方 30° 有连续障碍"这类局部
-# 空间模式，比 MLP 每个神经元独立看单条射线强。2 帧堆叠作为 2 个通道输入，
-# 卷积同时看空间（角度）与时间（两帧）邻域。
-# ============================================================================
-class LidarEncoder(nn.Module):
-    """环形 1D-CNN：输入 [B, LIDAR_STACK, LIDAR_COUNT] → 输出 [B, out_dim]"""
-
-    def __init__(self, in_ch: int = LIDAR_STACK,
-                 out_dim: int = 32,
-                 lidar_count: int = LIDAR_COUNT) -> None:
-        super().__init__()
-        pad = 2  # kernel=5 的 half padding
-        self.conv1 = nn.Conv1d(in_ch, 16, 5, padding=0)
-        self.conv2 = nn.Conv1d(16, 32, 5, padding=0)
-        self.conv3 = nn.Conv1d(32, out_dim, 3, padding=0)
-        self.pad = pad
-        self.pool = nn.AdaptiveAvgPool1d(1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x: [B, in_ch, LIDAR_COUNT]；circular padding 保持环形连续
-        x = F.pad(x, (self.pad, self.pad), mode="circular")
-        x = F.relu(self.conv1(x))
-        x = F.pad(x, (self.pad, self.pad), mode="circular")
-        x = F.relu(self.conv2(x))
-        x = F.pad(x, (1, 1), mode="circular")
-        x = F.relu(self.conv3(x))
-        return self.pool(x).squeeze(-1)  # [B, out_dim]
+OBS_DIM: int = 68         # 网络输入维度 = 64(lidar) + 2(goal: dist,bearing) + 2(vel: v,w)
+ACT_DIM: int = 2          # 网络输出动作维度 = (v, w)
+LOG_STD_MIN: float = -5.0 # log 标准差下界（防止方差坍缩为 0）
+LOG_STD_MAX: float = 2.0  # log 标准差上界（防止方差爆炸）
 
 
 # ============================================================================
@@ -75,11 +42,10 @@ class LidarEncoder(nn.Module):
 class PolicyNet(nn.Module):
     """SAC 高斯策略网络。
 
-    输入归一化后的 132 维观测向量（128 帧堆叠雷达 + 4 目标/速度），
-    输出动作分布参数 (mean, log_std)。
+    输入归一化后的 68 维观测向量，输出动作分布参数 (mean, log_std)。
     sample() 通过重参数化采样 + tanh 压缩，保证动作天然落在 (-1, 1)² 有界空间内。
 
-    架构：1D-CNN 雷达编码器 → MLP 共享躯干 → 双头输出 (mean_head, log_std_head)
+    架构：MLP 共享躯干 → 双头输出 (mean_head, log_std_head)
     """
 
     def __init__(self,
@@ -89,22 +55,19 @@ class PolicyNet(nn.Module):
         """初始化策略网络。
 
         Args:
-            obs_dim: 观测向量维度，默认 132（128 雷达堆叠 + 4 目标/速度）
+            obs_dim: 观测向量维度，默认 68
             act_dim: 动作空间维度，默认 2
             hidden: 隐藏层各层神经元数量元组，默认 (256, 256)
+                    支持任意长度元组（如 (128, 128)、(512, 256, 128)）
         """
         super().__init__()
         self.obs_dim = obs_dim
         self.act_dim = act_dim
         self.hidden = hidden
 
-        # ---- 1D-CNN 雷达编码器（2 帧堆叠 → 32 维空间特征） ----
-        self.lidar_enc = LidarEncoder()
-        feat_in = 32 + (obs_dim - LIDAR_COUNT * LIDAR_STACK)  # 雷达特征 + 标量
-
         # ---- 共享特征提取层（MLP 躯干） ----
         layers = []
-        in_dim = feat_in
+        in_dim = obs_dim
         for h in hidden:
             layers.append(nn.Linear(in_dim, h))
             layers.append(nn.ReLU())
@@ -130,12 +93,7 @@ class PolicyNet(nn.Module):
             log_std: 动作对数标准差，shape [B, act_dim]，
                      已 clamp 到 [LOG_STD_MIN, LOG_STD_MAX]
         """
-        n_lidar = LIDAR_COUNT * LIDAR_STACK
-        lidar = obs[:, :n_lidar].view(
-            obs.shape[0], LIDAR_STACK, LIDAR_COUNT)
-        feat = self.lidar_enc(lidar)
-        feat = torch.cat([feat, obs[:, n_lidar:]], dim=-1)
-        feat = self.feature_net(feat)
+        feat = self.feature_net(obs)
         mean = self.mean_head(feat)
         log_std = self.log_std_head(feat)
         # clamp 保证数值稳定，防止梯度爆炸/坍缩
@@ -198,7 +156,7 @@ class QNet(nn.Module):
     对状态-动作拼接对 (obs, act) 评估 Q 值。
     003 算法侧取两网输出的较小值缓解 Q 值高估偏差（clipped double-Q trick）。
 
-    架构：1D-CNN 雷达编码 → 与 (goal/vel ⊕ act) 拼接 → MLP → 单一 Q 值输出
+    架构：MLP（obs⊕act 拼接输入）→ 单一 Q 值输出
     """
 
     def __init__(self,
@@ -208,7 +166,7 @@ class QNet(nn.Module):
         """初始化 Q 网络。
 
         Args:
-            obs_dim: 观测向量维度，默认 132
+            obs_dim: 观测向量维度，默认 68
             act_dim: 动作空间维度，默认 2
             hidden: 隐藏层各层神经元数量元组，默认 (256, 256)
         """
@@ -217,13 +175,9 @@ class QNet(nn.Module):
         self.act_dim = act_dim
         self.hidden = hidden
 
-        # ---- 1D-CNN 雷达编码器 ----
-        self.lidar_enc = LidarEncoder()
-        feat_in = 32 + (obs_dim - LIDAR_COUNT * LIDAR_STACK) + act_dim
-
-        # ---- 特征提取层（输入：雷达特征 ⊕ 标量 ⊕ act） ----
+        # ---- 特征提取层（输入：obs ⊕ act） ----
         layers = []
-        in_dim = feat_in
+        in_dim = obs_dim + act_dim  # 拼接状态与动作
         for h in hidden:
             layers.append(nn.Linear(in_dim, h))
             layers.append(nn.ReLU())
@@ -244,11 +198,8 @@ class QNet(nn.Module):
         Returns:
             Q 值，shape [B, 1]，dtype float32
         """
-        n_lidar = LIDAR_COUNT * LIDAR_STACK
-        lidar = obs[:, :n_lidar].view(
-            obs.shape[0], LIDAR_STACK, LIDAR_COUNT)
-        feat = self.lidar_enc(lidar)
-        x = torch.cat([feat, obs[:, n_lidar:], act], dim=-1)
+        # 在最后一维拼接状态与动作
+        x = torch.cat([obs, act], dim=-1)
         x = self.net(x)
         q = self.q_head(x)
         return q

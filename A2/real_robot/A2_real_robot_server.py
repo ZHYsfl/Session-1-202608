@@ -94,7 +94,7 @@ class RealRobotServer(Node):
     DEFAULT_CFG = {
         "lidar_count": 64,
         "lidar_max_range": 3.5,
-        "obs_dim": 132,       # client 侧 2 帧雷达堆叠 + goal + vel（08-02 升级）
+        "obs_dim": 68,        # client 侧单帧打包（08-02 晚回退：弃用 132 帧堆叠）
         "act_dim": 2,
         "control_dt": 0.1,
         "max_episode_time": 60.0,

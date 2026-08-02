@@ -37,6 +37,7 @@ from config import (ACT_DIM, CONVERGE_CONSECUTIVE, CONVERGE_RATE,
                     EVAL_EPISODES, EVAL_INTERVAL, EVAL_SEED_BASE,
                     MAX_EPISODES, OBS_DIM, PING_INTERVAL, PING_TIMEOUT)
 from models import get_model_module
+from obs_pack import expert_action_v1_to_v2
 from sac import SACAgent
 
 log = logging.getLogger("train_async")
@@ -44,7 +45,9 @@ log = logging.getLogger("train_async")
 WARMUP = 5_000            # api.md §6.3：buffer 少于 5000 条不更新
 BUFFER_CAPACITY = 500_000  # 2026-08-02 起 50 万：新世界演示 14.3 万条预填后仍留
                            # ~71% 空间给在线数据，避免演示主导采样（run7 平台教训）
-MAX_PENDING = 5_000       # learner 落后上限：超了丢过期更新量，防数据无限过时
+MAX_PENDING = 5_000       # 背压阈值：learner 落后超过该值时 worker 暂停采集
+                          # （08-02 晚改：原来是丢过期更新，数据效率受损；
+                          # 背压让采集节奏自动对齐 learner 吞吐，UTD 恒 1:1）
 
 
 # ---------------- 线程安全的 agent 代理 ----------------
@@ -94,9 +97,6 @@ async def learner_task(agent: LockedAgent, buffer, counters: Counters,
     with ThreadPoolExecutor(max_workers=1) as ex:
         while not stop_event.is_set():
             pending = counters.steps_collected - counters.updates_done
-            if pending > MAX_PENDING:  # 落后太多：丢过期更新，保持数据新鲜度
-                counters.updates_done = counters.steps_collected - MAX_PENDING
-                pending = MAX_PENDING
             if len(buffer) >= WARMUP and pending > 0:
                 await loop.run_in_executor(ex, agent.update, buffer)
                 counters.updates_done += 1
@@ -106,8 +106,7 @@ async def learner_task(agent: LockedAgent, buffer, counters: Counters,
 
 # ---------------- 单个 worker：一条 websocket 连一个实例，循环跑局 ----------------
 async def worker(idx: int, uri: str, args, agent: LockedAgent, buffer,
-                 counters: Counters, gate: asyncio.Event,
-                 stop_event: asyncio.Event, holder: list,
+                 counters: Counters, stop_event: asyncio.Event, holder: list,
                  elog: T.EpisodeLogger, finish_reason: FinishReason):
     try:
         ws = await T.connect(uri, ping_interval=PING_INTERVAL,
@@ -125,19 +124,21 @@ async def worker(idx: int, uri: str, args, agent: LockedAgent, buffer,
                  idx, hello.get("env_name"), hello.get("protocol_version"),
                  cfg["obs_dim"], cfg["act_dim"])
         while not stop_event.is_set():
-            await gate.wait()   # 评估期间暂停采集
+            # 背压：learner 落后 MAX_PENDING 条就暂停采集（不丢更新，UTD 恒 1:1）
+            while (counters.steps_collected - counters.updates_done
+                   > MAX_PENDING) and not stop_event.is_set():
+                await asyncio.sleep(0.05)
             episode = counters.episodes
             if episode >= args.episodes:
                 break
             counters.episodes += 1
-            counters.active += 1
             try:
                 r = await T.run_episode(
                     ws, cfg, agent, buffer, args, seed=-1,
                     override=T.curriculum_override(episode, args),
                     deterministic=False, train=True)
             finally:
-                counters.active -= 1
+                pass
             counters.steps_collected += r["steps"]
             counters.total_resets += 1
             elog.log_episode(episode, r["steps"], r["return_"],
@@ -152,60 +153,69 @@ async def worker(idx: int, uri: str, args, agent: LockedAgent, buffer,
         await T.send_all_finish(ws, finish_reason.value, counters.total_resets)
 
 
-# ---------------- 评估调度：每 eval_interval 局评估一次 ----------------
+# ---------------- 评估调度：专职评估实例，与采集并行（不暂停 worker） ----------------
 async def eval_scheduler(args, agent: LockedAgent, models, model_mod,
-                         counters: Counters, gate: asyncio.Event,
-                         stop_event: asyncio.Event, holder: list,
+                         counters: Counters, stop_event: asyncio.Event,
                          evlog: T.EvalLogger,
                          finish_reason: FinishReason) -> bool:
-    best_rate = -1.0
-    converge_streak = 0
-    start = args.resume_episode + 1
-    target = ((start + args.eval_interval - 1) // args.eval_interval) \
-        * args.eval_interval
-    while target <= args.episodes and not stop_event.is_set():
-        while counters.episodes < target and not stop_event.is_set():
-            await asyncio.sleep(1.0)
-        if stop_event.is_set():
-            break
-        # 暂停采集，等所有在跑局收尾
-        gate.clear()
-        while counters.active > 0:
-            await asyncio.sleep(0.1)
-        while holder[0] is None and not stop_event.is_set():
-            await asyncio.sleep(0.1)   # 等 worker0 就绪；worker0 挂了则退出
-        if holder[0] is None:
-            gate.set()
-            return False
-        ws0, cfg0 = holder[0]["ws"], holder[0]["cfg"]
-        rate, succ = await T.evaluate(ws0, cfg0, agent, args)
-        counters.total_resets += args.eval_episodes
-        evlog.log_eval(target - 1, rate, succ, args.eval_episodes)
-        log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) ==",
-                 target - 1, 100 * rate, succ, args.eval_episodes)
+    """每 eval_interval 局在 --eval-uri 指向的专职实例上确定性评估。
 
-        await T.save_ckpt(model_mod, args.save_dir, f"ep_{target}", models,
-                          agent, target - 1,
-                          holder[0]["protocol_version"])
-        if rate > best_rate + 1e-9:
-            best_rate = rate
-            await T.save_ckpt(model_mod, args.save_dir, "best", models,
-                              agent, target - 1,
-                              holder[0]["protocol_version"])
-            log.info("== 新最佳成功率 %.2f%% ==", 100 * rate)
-        converge_streak = ((converge_streak + 1)
-                           if rate >= args.converge_rate else 0)
+    2026-08-02 晚改：旧实现评估时 gate.clear() 暂停全部采集 worker，
+    并行度越高浪费越大。现在评估走独立连接与采集并行——评估期间权重仍
+    在被 learner 更新（异步 RL 标准做法，微小不一致可接受），采集零停顿。
+    """
+    # 专职评估实例可能还没启动完，带重试连接
+    ws = None
+    while ws is None and not stop_event.is_set():
+        try:
+            ws = await T.connect(args.eval_uri, ping_interval=PING_INTERVAL,
+                                 ping_timeout=PING_TIMEOUT)
+        except OSError as e:
+            log.warning("评估实例 %s 未就绪（%s），3s 后重试", args.eval_uri, e)
+            await asyncio.sleep(3.0)
+    if ws is None:
+        return False
+    async with ws:
+        hello = await T.recv_msg(ws)
+        cfg = T.validate_hello(hello)
+        protocol_version = hello.get("protocol_version")
+        log.info("评估实例 hello OK: %s v%s", hello.get("env_name"),
+                 protocol_version)
 
-        gate.set()
-        if converge_streak >= args.converge_consecutive:
-            log.info("收敛：连续 %d 次评估 ≥%.0f%%（@ep%d）",
-                     args.converge_consecutive, 100 * args.converge_rate,
-                     target - 1)
-            finish_reason.value = "converged"
-            stop_event.set()
-            return True
-        target += args.eval_interval
-    gate.set()
+        best_rate = -1.0
+        converge_streak = 0
+        start = args.resume_episode + 1
+        target = ((start + args.eval_interval - 1) // args.eval_interval) \
+            * args.eval_interval
+        while target <= args.episodes and not stop_event.is_set():
+            while counters.episodes < target and not stop_event.is_set():
+                await asyncio.sleep(1.0)
+            if stop_event.is_set():
+                break
+            rate, succ = await T.evaluate(ws, cfg, agent, args)
+            counters.total_resets += args.eval_episodes
+            evlog.log_eval(target - 1, rate, succ, args.eval_episodes)
+            log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) ==",
+                     target - 1, 100 * rate, succ, args.eval_episodes)
+
+            await T.save_ckpt(model_mod, args.save_dir, f"ep_{target}", models,
+                              agent, target - 1, protocol_version)
+            if rate > best_rate + 1e-9:
+                best_rate = rate
+                await T.save_ckpt(model_mod, args.save_dir, "best", models,
+                                  agent, target - 1, protocol_version)
+                log.info("== 新最佳成功率 %.2f%% ==", 100 * rate)
+            converge_streak = ((converge_streak + 1)
+                               if rate >= args.converge_rate else 0)
+
+            if converge_streak >= args.converge_consecutive:
+                log.info("收敛：连续 %d 次评估 ≥%.0f%%（@ep%d）",
+                         args.converge_consecutive, 100 * args.converge_rate,
+                         target - 1)
+                finish_reason.value = "converged"
+                stop_event.set()
+                return True
+            target += args.eval_interval
     return False
 
 
@@ -240,6 +250,8 @@ async def amain(args) -> int:
         n = len(rew_npz)
         assert obs_npz.shape == (n, OBS_DIM), \
             f"preload obs 形状 {obs_npz.shape} 与 OBS_DIM={OBS_DIM} 不符"
+        # 旧动作映射专家数据 → 新映射（obs_pack §4，与 train.py 一致）
+        act_npz = expert_action_v1_to_v2(act_npz)
         for i in range(n):
             buffer.push(obs_npz[i], act_npz[i], float(rew_npz[i]),
                         nobs_npz[i], float(done_npz[i]))
@@ -256,8 +268,6 @@ async def amain(args) -> int:
     args.resume_episode = resume_episode
 
     counters = Counters(resume_episode + 1)
-    gate = asyncio.Event()
-    gate.set()
     stop_event = asyncio.Event()
     finish_reason = FinishReason()
     holder: list = [None] * args.workers
@@ -268,14 +278,14 @@ async def amain(args) -> int:
 
     uris = [f"ws://{args.host}:{args.base_port + i}" for i in range(args.workers)]
     workers = [asyncio.create_task(worker(i, uris[i], args, agent, buffer,
-                                          counters, gate, stop_event, holder,
+                                          counters, stop_event, holder,
                                           elog, finish_reason))
                for i in range(args.workers)]
     learner = asyncio.create_task(learner_task(agent, buffer, counters,
                                                stop_event))
     evaler = asyncio.create_task(eval_scheduler(args, agent, models, model_mod,
-                                                counters, gate, stop_event,
-                                                holder, evlog, finish_reason))
+                                                counters, stop_event,
+                                                evlog, finish_reason))
 
     try:
         await asyncio.gather(*workers)
@@ -294,9 +304,12 @@ async def amain(args) -> int:
 
 def main():
     ap = argparse.ArgumentParser(description="异步 RL（SAC 多环境并行）")
-    ap.add_argument("--workers", type=int, default=4, help="并行 webots 实例数")
+    ap.add_argument("--workers", type=int, default=12, help="并行采集实例数")
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--base-port", type=int, default=8765)
+    ap.add_argument("--base-port", type=int, default=8765,
+                    help="采集实例起始端口（worker i 用 base_port+i）")
+    ap.add_argument("--eval-uri", default="ws://127.0.0.1:8873",
+                    help="专职评估实例地址（与采集并行，不占用 worker）")
     ap.add_argument("--episodes", type=int, default=MAX_EPISODES)
     ap.add_argument("--resume", default=None)
     ap.add_argument("--preload", default=None)
@@ -310,6 +323,8 @@ def main():
                     default=CONVERGE_CONSECUTIVE)
     ap.add_argument("--no-curriculum", action="store_true",
                     help="关闭课程学习（前 cur_short_episodes 局压短时限）")
+    ap.add_argument("--auto-human", action="store_true",
+                    help="自动回复 human_confirm（仅真机调试用；仿真无 human 消息）")
     ap.add_argument("--cur-short-episodes", type=int,
                     default=T.CUR_SHORT_EPISODES)
     ap.add_argument("--cur-short-time", type=float, default=T.CUR_SHORT_TIME)
