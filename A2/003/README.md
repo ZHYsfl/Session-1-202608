@@ -84,12 +84,12 @@ python train.py --episodes 2000
 
 ### 4. 真机物理小车微调（sim-to-real，08-02 起）
 
-以 Webots 仿真收敛权重（`checkpoints/ckpt_sim_best.pt`，来自
-`D:\webots_projects\rl_chassis\A2\003\checkpoints\final_best.pt`，episode 449 / update_step 68695）
-为起点，在真机（`A2/real_robot` server，manual-drive 模式）上继续训练：
+以 Webots 仿真收敛权重（`checkpoints/ckpt_sim_v2_best.pt`，2026-08-02 新训，
+episode 1349 / update_step 146440 / 评估成功率 90%+）为起点，
+在真机（`A2/real_robot` server，manual-drive 模式）上继续训练：
 
 ```bash
-cd /home/zane/session_1/A2/003 && uv run python train.py --uri ws://192.168.43.114:8765 --resume checkpoints/ckpt_sim_best.pt --warmup 256
+cd /home/zane/session_1/A2/003 && uv run python train.py --uri ws://192.168.43.114:8765 --resume checkpoints/ckpt_sim_v2_best.pt --warmup 256
 ```
 
 要点：

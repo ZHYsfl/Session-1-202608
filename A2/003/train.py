@@ -46,7 +46,7 @@ from config import (ACT_DIM, CONVERGE_CONSECUTIVE, CONVERGE_RATE,
                     EVAL_INTERVAL, EVAL_SEED_BASE, MAX_EPISODES, OBS_DIM,
                     PING_INTERVAL, PING_TIMEOUT, WS_URI)
 from models import get_model_module, model_source
-from obs_pack import pack_obs, scale_action
+from obs_pack import ObsPacker, scale_action
 from reward import compute_reward, done_mask, outcome_of
 from sac import SACAgent
 
@@ -280,11 +280,12 @@ async def run_episode(ws, cfg, agent, buffer, args, *, seed: int,
     if obs.get("type") != "obs":
         raise ProtocolError(f"reset 后未收到 obs: {obs}")
 
+    packer = ObsPacker(cfg)   # 帧堆叠打包器（每局新建，首帧历史=当前帧）
     steps = 0
     ret = 0.0
     prev_a01 = None
     while not obs["done"]:
-        vec = pack_obs(obs, cfg)
+        vec = packer.pack(obs)
         a01 = agent.select_action(vec, deterministic=deterministic)
         if prev_a01 is None:
             prev_a01 = a01.copy()  # 第一步无历史动作 → 平滑惩罚为 0（§6.4）
@@ -297,7 +298,7 @@ async def run_episode(ws, cfg, agent, buffer, args, *, seed: int,
 
         r = compute_reward(obs, a01, prev_a01, obs_next)
         if train:
-            buffer.push(vec, a01, r, pack_obs(obs_next, cfg),
+            buffer.push(vec, a01, r, packer.pack(obs_next),
                         done_mask(obs_next))
         ret += r
         steps += 1

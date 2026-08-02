@@ -34,10 +34,11 @@ from controller import Supervisor
 PROTOCOL_VERSION = "1.1"
 ENV_NAME = "webots_diffbot_v1"
 # 默认只监听本机回环（127.0.0.1）：本机训练直接用，且不会触发 Windows 防火墙弹窗。
-# 若 003 需要从局域网另一台机器连接，改为 "0.0.0.0"（首次会弹防火墙授权，允许即可）。
+# WSL2 训练需从 Linux 侧连接 Windows 上的仿真 server：启动时设 ENV_WS_HOST=0.0.0.0
+# （首次会弹防火墙授权，允许即可）。
 # 异步 RL 多实例：每个 webots 实例用环境变量 ENV_WS_PORT 指定各自端口
 # （启动器 export 后 webots 把它传给 controller 进程）；缺省 8765 保持 api.md 约定。
-WS_HOST = "127.0.0.1"
+WS_HOST = os.environ.get("ENV_WS_HOST", "127.0.0.1")
 WS_PORT = int(os.environ.get("ENV_WS_PORT", "8765"))
 
 LIDAR_COUNT = 64
@@ -50,8 +51,7 @@ V_MAX = 0.5                 # m/s
 W_MAX = 1.5                 # rad/s
 GOAL_TOLERANCE = 0.15       # m
 ROBOT_RADIUS = 0.18         # m，碰撞判定半径（车身外接圆 ~0.170 + 余量）
-COLLISION_DIST = 0.28       # m，真机对齐（2026-08-02）：雷达 range_min=0.15m，
-                            # 0.18 判定太晚会真撞；0.28 留出惯性滑行余量
+COLLISION_DIST = 0.18       # m，真机对齐（08-02 晚用户定：2×2m 小场地放宽到车皮半径）
 MIN_LINEAR_VEL = 0.0        # m/s，真机对齐：后方是雷达盲区（车壳遮挡），禁止倒车
 # 模拟真机车壳遮挡扇区（车体角度，度，0=车头正前，逆时针）：该扇区读数屏蔽为
 # max_range。真机实测原始角度 115°~215° + offset -61.88° ≈ 车体 177°~277°。
@@ -395,43 +395,52 @@ class EnvServer:
         if config_override is not None:
             self.max_episode_time = float(config_override["max_episode_time"])
 
-        # 1) 采起点与目标（间距 >= 2.0 m）
+        # 场景生成：最多 200 次尝试，每次摆完障碍后做起点→目标栅格可达性检查，
+        # 不可达（死局，禁止倒车后无解）就整体重采样（2026-08-02 修复）
+        placed = []  # (x, y, r)
         for _ in range(200):
+            # 1) 采起点与目标（间距 >= 2.0 m）
             sx, sy = self.rng.uniform(-ROBOT_SAMPLE_LIM, ROBOT_SAMPLE_LIM, 2)
             gx, gy = self.rng.uniform(-ROBOT_SAMPLE_LIM, ROBOT_SAMPLE_LIM, 2)
-            if math.hypot(gx - sx, gy - sy) >= START_GOAL_MIN_DIST:
+            if math.hypot(gx - sx, gy - sy) < START_GOAL_MIN_DIST:
+                continue
+            self.goal_xy = (float(gx), float(gy))
+
+            # 2) 随机摆 N 个障碍物（互不重叠、离起点/目标表面 >= 0.4 m）
+            n_active = int(self.rng.integers(MIN_ACTIVE, MAX_ACTIVE + 1))
+            order = self.rng.permutation(N_OBSTACLES)
+            placed = []
+            for rank, obs_i in enumerate(order):
+                tf_trans, tf_rot, r = self.obstacles[obs_i]
+                if rank < n_active:
+                    pos = None
+                    for _ in range(100):
+                        ox, oy = self.rng.uniform(-OBSTACLE_POS_LIM, OBSTACLE_POS_LIM, 2)
+                        if math.hypot(ox - sx, oy - sy) < r + SAMPLE_CLEARANCE:
+                            continue
+                        if math.hypot(ox - gx, oy - gy) < r + SAMPLE_CLEARANCE:
+                            continue
+                        if any(math.hypot(ox - px, oy - py) < r + pr + OBSTACLE_GAP
+                               for px, py, pr in placed):
+                            continue
+                        pos = (float(ox), float(oy))
+                        break
+                    if pos is None:  # 摆不下就弃用这个障碍物
+                        tf_trans.setSFVec3f([50.0, 50.0, -1.0])
+                        continue
+                    placed.append((pos[0], pos[1], r))
+                    tf_trans.setSFVec3f([pos[0], pos[1], self._obstacle_z(obs_i)])
+                    tf_rot.setSFRotation([0, 0, 1, float(self.rng.uniform(0, 2 * math.pi))])
+                else:
+                    tf_trans.setSFVec3f([50.0, 50.0, -1.0])  # 闲置的沉到地板下
+
+            # 3) 死局检查：起点→目标必须可达
+            if self._is_reachable(sx, sy, gx, gy, placed):
                 break
-        self.goal_xy = (float(gx), float(gy))
+            # 不可达：清理本轮放置（下一轮会重写所有障碍位置）
+            placed = []
 
-        # 2) 随机摆 N 个障碍物（互不重叠、离起点/目标表面 >= 0.4 m）
-        n_active = int(self.rng.integers(MIN_ACTIVE, MAX_ACTIVE + 1))
-        order = self.rng.permutation(N_OBSTACLES)
-        placed = []  # (x, y, r)
-        for rank, obs_i in enumerate(order):
-            tf_trans, tf_rot, r = self.obstacles[obs_i]
-            if rank < n_active:
-                pos = None
-                for _ in range(100):
-                    ox, oy = self.rng.uniform(-OBSTACLE_POS_LIM, OBSTACLE_POS_LIM, 2)
-                    if math.hypot(ox - sx, oy - sy) < r + SAMPLE_CLEARANCE:
-                        continue
-                    if math.hypot(ox - gx, oy - gy) < r + SAMPLE_CLEARANCE:
-                        continue
-                    if any(math.hypot(ox - px, oy - py) < r + pr + OBSTACLE_GAP
-                           for px, py, pr in placed):
-                        continue
-                    pos = (float(ox), float(oy))
-                    break
-                if pos is None:  # 摆不下就弃用这个障碍物
-                    tf_trans.setSFVec3f([50.0, 50.0, -1.0])
-                    continue
-                placed.append((pos[0], pos[1], r))
-                tf_trans.setSFVec3f([pos[0], pos[1], self._obstacle_z(obs_i)])
-                tf_rot.setSFRotation([0, 0, 1, float(self.rng.uniform(0, 2 * math.pi))])
-            else:
-                tf_trans.setSFVec3f([50.0, 50.0, -1.0])  # 闲置的沉到地板下
-
-        # 3) 传送机器人到起点，随机朝向
+        # 4) 传送机器人到起点，随机朝向
         self.tf_translation.setSFVec3f([float(sx), float(sy), 0.0])
         self.tf_rotation.setSFRotation([0, 0, 1, float(self.rng.uniform(-math.pi, math.pi))])
         self.tf_goal.setSFVec3f([self.goal_xy[0], self.goal_xy[1], 0.005])
@@ -457,6 +466,47 @@ class EnvServer:
               f"障碍={[(round(px,3), round(py,3), r) for px, py, r in placed]}",
               flush=True)
         return self._build_obs(0.0, 0.0, False, False, False)
+
+    @staticmethod
+    def _is_reachable(sx, sy, gx, gy, placed,
+                      res: float = 0.1, inflate: float = 0.25) -> bool:
+        """
+        栅格 BFS 死局检查：起点→目标是否存在可行路径。
+        障碍物按圆处理并膨胀 inflate（车身半径 0.18 + 余量），
+        4×4 m 场地 0.1 m 栅格 = 41×41，BFS 开销可忽略。
+        """
+        half = ARENA_SIZE / 2.0
+        n = int(ARENA_SIZE / res) + 1
+        occ = np.zeros((n, n), dtype=bool)
+        for px, py, r in placed:
+            rr = (r + inflate) ** 2
+            i0 = max(0, int((px - r - inflate + half) / res))
+            i1 = min(n - 1, int((px + r + inflate + half) / res))
+            j0 = max(0, int((py - r - inflate + half) / res))
+            j1 = min(n - 1, int((py + r + inflate + half) / res))
+            xs = np.arange(i0, i1 + 1) * res - half + res / 2
+            ys = np.arange(j0, j1 + 1) * res - half + res / 2
+            xx, yy = np.meshgrid(xs, ys, indexing="ij")
+            occ[i0:i1 + 1, j0:j1 + 1] |= ((xx - px) ** 2 + (yy - py) ** 2) < rr
+        si, sj = int((sx + half) / res), int((sy + half) / res)
+        gi, gj = int((gx + half) / res), int((gy + half) / res)
+        if not (0 <= si < n and 0 <= sj < n and 0 <= gi < n and 0 <= gj < n):
+            return False
+        if occ[si, sj] or occ[gi, gj]:
+            return False
+        q = [(si, sj)]
+        seen = {(si, sj)}
+        while q:
+            i, j = q.pop()
+            if (i, j) == (gi, gj):
+                return True
+            for di, dj in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ni, nj = i + di, j + dj
+                if 0 <= ni < n and 0 <= nj < n and not occ[ni, nj] \
+                        and (ni, nj) not in seen:
+                    seen.add((ni, nj))
+                    q.append((ni, nj))
+        return False
 
     def _obstacle_z(self, obs_i):
         # 障碍物底面贴地：按 .wbt 中几何高度取半高

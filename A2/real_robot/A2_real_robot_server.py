@@ -102,8 +102,9 @@ class RealRobotServer(Node):
         "w_max": 1.5,
         "goal_tolerance": 0.15,
         "robot_radius": 0.18,
-        "collision_dist": 0.28,   # 真机碰撞判定距离（m）：雷达 range_min=0.15m，
-                                  # 0.18 判定太晚会真撞上；0.28 留出惯性滑行余量
+        "collision_dist": 0.18,   # 真机碰撞判定距离（m）：用户定 08-02 晚
+                                  # （= robot_radius 车皮半径；雷达 range_min=0.15m，
+                                  #  注意刹车滑行后可能轻微擦碰）
         "arena_size": 4.0,
     }
 
@@ -365,7 +366,7 @@ class RealRobotServer(Node):
         twist.angular.z = float(w)
         self.cmd_vel_pub.publish(twist)
 
-    def _safety_clamp(self, v: float, w: float, safe_dist: float = 0.30) -> tuple:
+    def _safety_clamp(self, v: float, w: float, safe_dist: float = 0.22) -> tuple:
         """
         遥控/动作安全保护：前方（车头 ±30°）障碍 < safe_dist 时禁止前进，
         后方障碍 < safe_dist 时禁止后退。返回 clamped (v, w)。

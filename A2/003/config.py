@@ -22,7 +22,7 @@ W_MAX = 1.5
 GOAL_TOLERANCE = 0.15
 ROBOT_RADIUS = 0.18
 ARENA_SIZE = 4.0
-OBS_DIM = 68
+OBS_DIM = 132             # 2026-08-02 升级：128(2帧雷达堆叠) + 2(goal) + 2(vel)
 ACT_DIM = 2
 
 # 观测归一化常数（api.md §4）
