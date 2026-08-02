@@ -9,12 +9,11 @@ A2 真机低速移动测试（交互式，按回车确认人工操作完成）�
 流程：
   1. 连 server，收 hello
   2. 发 reset
-  3. 提示：把车放到目标点，按回车 → human_confirm(record_goal)
-  4. 提示：把车放到起点（离目标点 ≥0.3m），按回车 → human_confirm(record_start)
-  5. 发 v=0.1, w=0 走 3 秒（30 步）
-  6. 发 v=0, w=0 停 1 步
-  7. 打印初始/最终距离、odom 速度、lidar[0]
-  8. 发 all_finish 收 bye
+  3. 按 server 提示完成人工操作并按回车（可能 1~2 次）
+  4. 收到初始 obs 后，发 v=0.1, w=0 走 3 秒（30 步）
+  5. 发 v=0, w=0 停 1 步
+  6. 打印初始/最终距离、odom 速度、lidar[0]
+  7. 发 all_finish 收 bye
 """
 
 import asyncio
@@ -41,6 +40,23 @@ def wait_for_human(detail: str):
     input("完成后按回车继续...")
 
 
+async def recv_until_obs(ws):
+    """处理 human 消息直到收到 obs。"""
+    while True:
+        msg = await recv(ws)
+        mtype = msg.get("type")
+        if mtype == "obs":
+            return msg
+        if mtype == "human":
+            wait_for_human(msg.get("detail", ""))
+            await send(ws, {
+                "type": "human_confirm",
+                "action": msg.get("action", "unknown"),
+            })
+            continue
+        raise RuntimeError(f"reset 后收到意外消息: {msg}")
+
+
 async def main():
     uri = sys.argv[1] if len(sys.argv) > 1 else "ws://192.168.43.114:8765"
     print(f"连接 {uri} ...")
@@ -54,20 +70,8 @@ async def main():
         # reset
         await send(ws, {"type": "reset", "seed": -1, "config_override": None})
 
-        # record goal
-        msg = await recv(ws)
-        assert msg["type"] == "human" and msg["action"] == "record_goal"
-        wait_for_human(msg["detail"])
-        await send(ws, {"type": "human_confirm", "action": "record_goal"})
-
-        # record start
-        msg = await recv(ws)
-        assert msg["type"] == "human" and msg["action"] == "record_start"
-        wait_for_human(msg["detail"])
-        await send(ws, {"type": "human_confirm", "action": "record_start"})
-
-        # 初始 obs
-        obs = await recv(ws)
+        # 初始 obs（自动处理 human 提示）
+        obs = await recv_until_obs(ws)
         print(f"\n初始: step={obs['step_id']} t={obs['t']:.1f} "
               f"goal_dist={obs['goal']['dist']:.3f} "
               f"vel=({obs['vel']['v']:.3f},{obs['vel']['w']:.3f}) "
@@ -75,7 +79,7 @@ async def main():
 
         if obs["done"]:
             print(f"\n注意：初始 obs 就 done 了（{obs['flags']}），"
-                  "说明目标点和起点太近，请重跑并把两点分开。")
+                  "说明目标点和起点太近，请检查 --goal-relative-x/y 参数。")
             await send(ws, {"type": "all_finish", "reason": "interrupted",
                             "total_episodes": 1})
             await recv(ws)

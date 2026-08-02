@@ -5,13 +5,14 @@ A2 真机 WebSocket Server（替换 001 Webots 仿真）
 
 协议：兼容 A2 api.md v1.1，额外扩展 human/human_confirm 用于真机人工介入。
 
-人工介入流程：
+人工介入流程（默认 manual-drive）：
   1. client 发 reset
   2. server 回 human(action="record_goal")，线下把车摆到目标点
   3. client 发 human_confirm(action="record_goal")，server 记录当前 /odom 为目标点
-  4. server 回 human(action="record_start")，线下把车摆到起点
-  5. client 发 human_confirm(action="record_start")，server 记录当前 /odom 为起点，并发初始 obs
-  6. 进入 RUNNING，client 发 action → server 执行 0.1s → 回 obs
+  4. server 回 human(action="drive_to_start")，用户把车推到/开到起点（可任意朝向）
+  5. client 发 human_confirm(action="drive_to_start")，server 记录当前 /odom 为起点
+  6. server 发初始 obs，进入 RUNNING
+  7. client 发 action → server 执行 0.1s → 回 obs
 
 运行：
     source /opt/ros/jazzy/setup.bash
@@ -22,6 +23,14 @@ A2 真机 WebSocket Server（替换 001 Webots 仿真）
     --port 8765
     --lidar-front-offset-deg 0.0
     --log-dir ~/a2_real_robot_logs
+    --goal-mode relative|manual-drive
+    --goal-relative-x 2.0
+    --goal-relative-y 0.0
+
+说明：
+    默认 --goal-mode=manual-drive。真机 /odom 只能跟踪车轮移动，不能跟踪
+    人手搬车。manual-drive 模式下先摆目标点，再推车/开车到起点，odom 会
+    记录真实位移；relative 模式只用于测试，目标点由 start + 相对偏移计算。
 """
 
 import argparse
@@ -147,7 +156,8 @@ class RealRobotServer(Node):
         self.latest_odom_time = 0.0
 
         # 状态机
-        self.state = "WAIT_RESET"  # WAIT_RESET, RECORD_GOAL, RECORD_START, RUNNING, FINISHED
+        # WAIT_RESET, RECORD_GOAL, DRIVE_TO_START, RECORD_START, RUNNING, FINISHED
+        self.state = "WAIT_RESET"
         self.websocket: Optional[WebSocketServerProtocol] = None
 
         # episode 状态
@@ -423,8 +433,18 @@ class RealRobotServer(Node):
         seed = msg.get("seed", -1)
         self._last_seed = seed
 
-        if self.goal_mode == "relative":
-            # 相对目标点模式：只需摆起点，goal 由 start + goal_relative 计算
+        if self.goal_mode == "manual-drive":
+            # manual-drive：先摆目标点，再推车/开车到起点（odom 记录位移）
+            self.state = "RECORD_GOAL"
+            log.info("reset 收到，seed=%s，goal_mode=manual-drive，"
+                     "等待人工摆放目标点", seed)
+            self._send({
+                "type": "human",
+                "action": "record_goal",
+                "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')",
+            })
+        else:
+            # relative 模式：只需摆起点，goal 由 start + goal_relative 计算
             self.state = "RECORD_START"
             log.info("reset 收到，seed=%s，goal_mode=relative，"
                      "goal=(%.2f, %.2f)，等待人工摆放起点",
@@ -433,15 +453,6 @@ class RealRobotServer(Node):
                 "type": "human",
                 "action": "record_start",
                 "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
-            })
-        else:
-            # 手动模式：先摆目标点，再摆起点（两点间需用车轮移动，odom 才有效）
-            self.state = "RECORD_GOAL"
-            log.info("reset 收到，seed=%s，等待人工摆放目标点", seed)
-            self._send({
-                "type": "human",
-                "action": "record_goal",
-                "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')",
             })
 
     def _start_episode(self):
@@ -472,12 +483,33 @@ class RealRobotServer(Node):
             self.goal_abs = Pose2D(current.x, current.y, current.yaw)
             log.info("记录目标点: x=%.3f y=%.3f yaw=%.3f",
                      current.x, current.y, current.yaw)
-            self.state = "RECORD_START"
-            self._send({
-                "type": "human",
-                "action": "record_start",
-                "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
-            })
+            if self.goal_mode == "manual-drive":
+                self.state = "DRIVE_TO_START"
+                self._send({
+                    "type": "human",
+                    "action": "drive_to_start",
+                    "detail": "请把车推到/开到起点（可以任意旋转朝向），到位后发送 human_confirm('drive_to_start')",
+                })
+            else:
+                self.state = "RECORD_START"
+                self._send({
+                    "type": "human",
+                    "action": "record_start",
+                    "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
+                })
+
+        elif action == "drive_to_start":
+            if self.state != "DRIVE_TO_START":
+                self._error("WRONG_STATE",
+                            f"当前不是 DRIVE_TO_START 状态，而是 {self.state}")
+                return
+            if current is None:
+                self._error("INTERNAL", "尚未收到 /odom，无法记录起点")
+                return
+            self.start_abs = Pose2D(current.x, current.y, current.yaw)
+            log.info("记录起点: x=%.3f y=%.3f yaw=%.3f",
+                     current.x, current.y, current.yaw)
+            self._start_episode()
 
         elif action == "record_start":
             if self.state != "RECORD_START":
@@ -594,6 +626,20 @@ def main():
         help="雷达 0° 相对于车头正前的偏移（度）。正数表示车头正前在雷达原始 0° 的左侧"
     )
     parser.add_argument("--log-dir", type=Path, default=Path("~/a2_real_robot_logs"))
+    parser.add_argument(
+        "--goal-mode", type=str, default="manual-drive",
+        choices=["relative", "manual-drive"],
+        help="目标点设定方式：relative=由起点相对偏移计算（测试用）；"
+             "manual-drive=先摆放目标点，再推车/开车到起点（训练用）"
+    )
+    parser.add_argument(
+        "--goal-relative-x", type=float, default=2.0,
+        help="relative 模式下目标点相对于起点的 x 偏移（米，车头前为正）"
+    )
+    parser.add_argument(
+        "--goal-relative-y", type=float, default=0.0,
+        help="relative 模式下目标点相对于起点的 y 偏移（米，左侧为正）"
+    )
     args = parser.parse_args()
 
     rclpy.init()

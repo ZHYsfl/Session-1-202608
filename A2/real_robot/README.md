@@ -62,19 +62,23 @@ python3 ~/A2_real_robot_server.py --lidar-front-offset-deg <标定值>
 python3 ~/A2_real_robot_server.py --lidar-front-offset-deg -61.88
 ```
 
-## 人工介入流程
+## 人工介入流程（默认 manual-drive）
 
 ```text
 client 发 reset
 server 回 human(record_goal)
   ↓ 人把车摆到目标点
 client 发 human_confirm(record_goal)
-server 回 human(record_start)
-  ↓ 人把车摆到起点
-client 发 human_confirm(record_start)
+server 回 human(drive_to_start)
+  ↓ 人把车推到/开到起点（可任意旋转朝向）
+client 发 human_confirm(drive_to_start)
 server 回 obs(step_id=0)
   ↓ 进入 action ↔ obs 循环
 ```
+
+**注意**：小车只能靠车轮移动让 /odom 更新位置。人手把车搬到目标点或起点，
+/odom 不会更新，导致 goal 与 start 重合。因此必须先摆目标点，再**推车/开车**
+到起点。
 
 ## 源码同步（重要）
 
