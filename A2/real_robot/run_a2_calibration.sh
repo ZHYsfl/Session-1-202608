@@ -29,7 +29,7 @@ fi
 
 LIDAR_OFFSET="-61.88"
 echo "启动 A2 标定 server (goal_mode=relative, goal_relative_x=1.5) ..."
-exec python3 ~/A2_real_robot_server.py \
+exec python3 ~/A2/real_robot/A2_real_robot_server.py \
     --lidar-front-offset-deg ${LIDAR_OFFSET} \
     --goal-mode relative \
     --goal-relative-x 1.5 \
