@@ -1,0 +1,695 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+A2 真机 WebSocket Server（替换 001 Webots 仿真）
+
+协议：兼容 A2 api.md v1.1，额外扩展 human/human_confirm 用于真机人工介入。
+
+人工介入流程（默认 manual-drive）：
+  1. client 发 reset
+  2. server 回 human(action="record_goal")，线下把车摆到目标点
+  3. client 发 human_confirm(action="record_goal")，server 记录当前 /odom 为目标点
+  4. server 回 human(action="drive_to_start")，用户把车推到/开到起点（可任意朝向）
+  5. client 发 human_confirm(action="drive_to_start")，server 记录当前 /odom 为起点
+  6. server 发初始 obs，进入 RUNNING
+  7. client 发 action → server 执行 0.1s → 回 obs
+
+运行：
+    source /opt/ros/jazzy/setup.bash
+    source ~/ros2_ws/install/setup.bash
+    python3 ~/A2_real_robot_server.py
+
+参数：
+    --port 8765
+    --lidar-front-offset-deg 0.0
+    --log-dir ~/a2_real_robot_logs
+    --goal-mode relative|manual-drive
+    --goal-relative-x 2.0
+    --goal-relative-y 0.0
+
+说明：
+    默认 --goal-mode=manual-drive。真机 /odom 只能跟踪车轮移动，不能跟踪
+    人手搬车。manual-drive 模式下先摆目标点，再推车/开车到起点，odom 会
+    记录真实位移；relative 模式只用于测试，目标点由 start + 相对偏移计算。
+"""
+
+import argparse
+import asyncio
+import csv
+import json
+import logging
+import math
+import threading
+import time
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import rclpy
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+import websockets
+from websockets.server import WebSocketServerProtocol
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+log = logging.getLogger("a2_real_robot")
+
+
+def normalize_angle(angle: float) -> float:
+    """把角度归一化到 (-π, π]"""
+    while angle <= -math.pi:
+        angle += 2.0 * math.pi
+    while angle > math.pi:
+        angle -= 2.0 * math.pi
+    return angle
+
+
+def quat_to_yaw(qx: float, qy: float, qz: float, qw: float) -> float:
+    """四元数转 yaw（绕 Z 轴）"""
+    siny_cosp = 2.0 * (qw * qz + qx * qy)
+    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
+@dataclass
+class Pose2D:
+    x: float = 0.0
+    y: float = 0.0
+    yaw: float = 0.0
+
+
+class RealRobotServer(Node):
+    PROTOCOL_VERSION = "1.1"
+    ENV_NAME = "real_diffbot_v1"
+
+    # A2 协议默认常量（hello.config 会逐项下发）
+    DEFAULT_CFG = {
+        "lidar_count": 64,
+        "lidar_max_range": 3.5,
+        "obs_dim": 68,
+        "act_dim": 2,
+        "control_dt": 0.1,
+        "max_episode_time": 60.0,
+        "v_max": 0.5,
+        "w_max": 1.5,
+        "goal_tolerance": 0.15,
+        "robot_radius": 0.18,
+        "arena_size": 4.0,
+    }
+
+    def __init__(self, args):
+        super().__init__("a2_real_robot_server")
+
+        # 参数
+        self.declare_parameter("port", args.port)
+        self.declare_parameter("cmd_vel_topic", "/cmd_vel")
+        self.declare_parameter("scan_topic", "/scan")
+        self.declare_parameter("odom_topic", "/odom")
+        self.declare_parameter("lidar_front_offset_deg", args.lidar_front_offset_deg)
+        self.declare_parameter("log_dir", str(args.log_dir))
+        self.declare_parameter("goal_mode", args.goal_mode)
+        self.declare_parameter("goal_relative_x", args.goal_relative_x)
+        self.declare_parameter("goal_relative_y", args.goal_relative_y)
+
+        self.port = self.get_parameter("port").value
+        self.goal_mode = self.get_parameter("goal_mode").value
+        self.goal_relative = Pose2D(
+            self.get_parameter("goal_relative_x").value,
+            self.get_parameter("goal_relative_y").value,
+            0.0,
+        )
+        self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").value
+        self.scan_topic = self.get_parameter("scan_topic").value
+        self.odom_topic = self.get_parameter("odom_topic").value
+        self.lidar_front_offset_rad = math.radians(
+            self.get_parameter("lidar_front_offset_deg").value
+        )
+        self.log_dir = Path(self.get_parameter("log_dir").value).expanduser()
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # 配置（reset 的 config_override 只允许改 max_episode_time）
+        self.cfg = dict(self.DEFAULT_CFG)
+
+        # ROS2 pub/sub
+        self.cmd_vel_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
+        self.scan_sub = self.create_subscription(
+            LaserScan, self.scan_topic, self._scan_callback, 10
+        )
+        self.odom_sub = self.create_subscription(
+            Odometry, self.odom_topic, self._odom_callback, 10
+        )
+
+        # 数据锁
+        self._lock = threading.Lock()
+        self.latest_scan: Optional[LaserScan] = None
+        self.latest_odom: Optional[Pose2D] = None
+        self.latest_twist = (0.0, 0.0)  # (v, w)
+        self.latest_scan_time = 0.0
+        self.latest_odom_time = 0.0
+
+        # 状态机
+        # WAIT_RESET, RECORD_GOAL, DRIVE_TO_START, RECORD_START, RUNNING, FINISHED
+        self.state = "WAIT_RESET"
+        self.websocket: Optional[WebSocketServerProtocol] = None
+
+        # episode 状态
+        self.episode_id = 0
+        self.step_id = 0
+        self.episode_t = 0.0
+        self.goal_abs = Pose2D()
+        self.start_abs = Pose2D()
+        self.current_action = (0.0, 0.0)
+        self._last_seed = -1
+        self._step_in_progress = False
+        self._step_task: Optional[asyncio.Task] = None
+
+        # cmd_vel 发布循环
+        self._cmd_vel_loop_task: Optional[asyncio.Task] = None
+        self._stop_cmd_vel = False
+
+        # server 退出信号
+        self._stop_event = asyncio.Event()
+
+        # 日志
+        self._episode_csv_path = self.log_dir / "episodes.csv"
+        self._episode_csv_exists = self._episode_csv_path.exists()
+        self._episode_csv_lock = threading.Lock()
+
+    # ---------------- ROS2 回调 ----------------
+    def _scan_callback(self, msg: LaserScan):
+        with self._lock:
+            self.latest_scan = msg
+            self.latest_scan_time = time.time()
+
+    def _odom_callback(self, msg: Odometry):
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        yaw = quat_to_yaw(q.x, q.y, q.z, q.w)
+        t = msg.twist.twist
+        with self._lock:
+            self.latest_odom = Pose2D(p.x, p.y, yaw)
+            self.latest_twist = (float(t.linear.x), float(t.angular.z))
+            self.latest_odom_time = time.time()
+
+    # ---------------- 工具函数 ----------------
+    def _send(self, msg: dict):
+        if self.websocket is None:
+            return
+        asyncio.create_task(self._async_send(msg))
+
+    async def _async_send(self, msg: dict):
+        if self.websocket is None:
+            return
+        try:
+            await self.websocket.send(json.dumps(msg, allow_nan=False))
+        except Exception as e:
+            log.error("发送消息失败: %s", e)
+
+    def _error(self, code: str, detail: str):
+        log.error("error %s: %s", code, detail)
+        self._send({"type": "error", "code": code, "detail": detail})
+
+    # ---------------- lidar 处理 ----------------
+    def _resample_lidar(self, scan: LaserScan) -> np.ndarray:
+        """
+        把 /scan 重采样到 cfg['lidar_count'] 线。
+        第 0 线 = 车头正前，逆时针排列。
+        """
+        n = self.cfg["lidar_count"]
+        max_range = self.cfg["lidar_max_range"]
+        ranges = np.asarray(scan.ranges, dtype=np.float32)
+        ranges[~np.isfinite(ranges)] = max_range
+        ranges = np.clip(ranges, 0.0, max_range)
+
+        m = len(ranges)
+        raw_angles = scan.angle_min + np.arange(m, dtype=np.float32) * scan.angle_increment
+        # 安装偏移：车头正前在 raw scan 中的角度 = offset
+        # 因此 target=0 时应取 raw angle ≈ offset 的值
+        raw_angles = raw_angles - self.lidar_front_offset_rad
+
+        target_angles = np.array([
+            normalize_angle(i * 2.0 * math.pi / n) for i in range(n)
+        ], dtype=np.float32)
+
+        out = np.empty(n, dtype=np.float32)
+        for i, ta in enumerate(target_angles):
+            diffs = np.empty(m, dtype=np.float32)
+            for j in range(m):
+                d = abs(normalize_angle(raw_angles[j] - ta))
+                diffs[j] = d
+            idx = int(np.argmin(diffs))
+            out[i] = ranges[idx]
+        return out
+
+    @staticmethod
+    def _median_filter_circular(arr: np.ndarray) -> np.ndarray:
+        """3 邻域中位数滤波（环形）"""
+        n = len(arr)
+        out = np.empty_like(arr)
+        for i in range(n):
+            a = arr[(i - 1) % n]
+            b = arr[i]
+            c = arr[(i + 1) % n]
+            out[i] = float(np.median([a, b, c]))
+        return out
+
+    # ---------------- 观测计算 ----------------
+    def _get_current_pose(self) -> Optional[Pose2D]:
+        with self._lock:
+            return self.latest_odom
+
+    def _get_latest_twist(self) -> tuple:
+        with self._lock:
+            return self.latest_twist
+
+    def _get_latest_scan(self) -> Optional[LaserScan]:
+        with self._lock:
+            return self.latest_scan
+
+    def _compute_goal_relative(self, current: Pose2D) -> tuple:
+        """返回 (dist, bearing)，bearing 左正右负，范围 (-π, π]"""
+        dx = self.goal_abs.x - current.x
+        dy = self.goal_abs.y - current.y
+        # 转到车体坐标系：x 前，y 左
+        local_x = dx * math.cos(current.yaw) + dy * math.sin(current.yaw)
+        local_y = -dx * math.sin(current.yaw) + dy * math.cos(current.yaw)
+        dist = math.hypot(local_x, local_y)
+        bearing = normalize_angle(math.atan2(local_y, local_x))
+        return dist, bearing
+
+    def _build_obs(self) -> dict:
+        scan = self._get_latest_scan()
+        current = self._get_current_pose()
+        v_meas, w_meas = self._get_latest_twist()
+
+        # lidar
+        if scan is None:
+            lidar = [self.cfg["lidar_max_range"]] * self.cfg["lidar_count"]
+        else:
+            raw = self._resample_lidar(scan)
+            filtered = self._median_filter_circular(raw)
+            lidar = [float(x) for x in filtered]
+
+        # goal & vel
+        if current is None:
+            dist, bearing = 0.0, 0.0
+            v_meas, w_meas = 0.0, 0.0
+        else:
+            dist, bearing = self._compute_goal_relative(current)
+
+        flags = {
+            "collision": False,
+            "goal_reached": False,
+            "timeout": False,
+        }
+        done = False
+
+        min_lidar = min(lidar)
+        if min_lidar < self.cfg["robot_radius"]:
+            flags["collision"] = True
+            done = True
+        elif dist <= self.cfg["goal_tolerance"]:
+            flags["goal_reached"] = True
+            done = True
+        elif self.episode_t >= self.cfg["max_episode_time"]:
+            flags["timeout"] = True
+            done = True
+
+        return {
+            "type": "obs",
+            "episode_id": self.episode_id,
+            "step_id": self.step_id,
+            "t": round(self.episode_t, 3),
+            "lidar": lidar,
+            "goal": {"dist": round(dist, 3), "bearing": round(bearing, 3)},
+            "vel": {"v": round(v_meas, 3), "w": round(w_meas, 3)},
+            "flags": flags,
+            "done": done,
+        }
+
+    # ---------------- 控制循环 ----------------
+    async def _cmd_vel_loop(self):
+        """50Hz 持续发布当前动作；无动作时发零速"""
+        while rclpy.ok() and not self._stop_cmd_vel:
+            v, w = self.current_action
+            twist = Twist()
+            twist.linear.x = float(v)
+            twist.angular.z = float(w)
+            self.cmd_vel_pub.publish(twist)
+            await asyncio.sleep(0.02)
+        # 退出前再发一次零速
+        self.cmd_vel_pub.publish(Twist())
+
+    def _start_cmd_vel_loop(self):
+        if self._cmd_vel_loop_task is None or self._cmd_vel_loop_task.done():
+            self._stop_cmd_vel = False
+            self._cmd_vel_loop_task = asyncio.create_task(self._cmd_vel_loop())
+
+    def _stop_cmd_vel_loop(self):
+        self._stop_cmd_vel = True
+        self.cmd_vel_pub.publish(Twist())
+
+    # ---------------- episode 推进 ----------------
+    async def _run_step(self, v: float, w: float):
+        """执行一个 control_dt，然后发 obs"""
+        self._step_in_progress = True
+        self.current_action = (v, w)
+        self._start_cmd_vel_loop()
+
+        await asyncio.sleep(self.cfg["control_dt"])
+
+        self.step_id += 1
+        self.episode_t = round(self.step_id * self.cfg["control_dt"], 3)
+        obs = self._build_obs()
+        self._send(obs)
+
+        if obs["done"]:
+            self._log_episode(obs)
+            self.state = "WAIT_RESET"
+            self.current_action = (0.0, 0.0)
+            self._stop_cmd_vel_loop()
+
+        self._step_in_progress = False
+
+    def _log_episode(self, obs: dict):
+        outcome = "timeout"
+        if obs["flags"]["collision"]:
+            outcome = "collision"
+        elif obs["flags"]["goal_reached"]:
+            outcome = "goal_reached"
+        with self._episode_csv_lock:
+            mode = "a" if self._episode_csv_exists else "w"
+            with open(self._episode_csv_path, mode, newline="", encoding="utf-8") as f:
+                w = csv.writer(f)
+                if not self._episode_csv_exists:
+                    w.writerow([
+                        "episode_id", "steps", "outcome", "min_lidar_ever",
+                        "final_dist", "seed", "timestamp"
+                    ])
+                    self._episode_csv_exists = True
+                min_lidar = round(min(obs["lidar"]), 3)
+                w.writerow([
+                    self.episode_id, self.step_id, outcome, min_lidar,
+                    obs["goal"]["dist"], self._last_seed,
+                    datetime.now().isoformat()
+                ])
+
+    # ---------------- WebSocket 消息处理 ----------------
+    def _handle_hello(self):
+        self._send({
+            "type": "hello",
+            "protocol_version": self.PROTOCOL_VERSION,
+            "env_name": self.ENV_NAME,
+            "config": self.cfg,
+        })
+
+    def _handle_reset(self, msg: dict):
+        if self.state not in ("WAIT_RESET", "FINISHED"):
+            self._error("WRONG_STATE",
+                        f"reset 只能在 WAIT_RESET/FINISHED 状态发，当前 {self.state}")
+            return
+
+        override = msg.get("config_override")
+        if override is not None:
+            if not isinstance(override, dict):
+                self._error("BAD_FIELD", "config_override 必须是 object 或 null")
+                return
+            allowed = {"max_episode_time"}
+            bad = set(override.keys()) - allowed
+            if bad:
+                self._error("BAD_FIELD", f"config_override 不允许的键: {bad}")
+                return
+            if "max_episode_time" in override:
+                self.cfg["max_episode_time"] = float(override["max_episode_time"])
+
+        seed = msg.get("seed", -1)
+        self._last_seed = seed
+
+        if self.goal_mode == "manual-drive":
+            # manual-drive：先摆目标点，再推车/开车到起点（odom 记录位移）
+            self.state = "RECORD_GOAL"
+            log.info("reset 收到，seed=%s，goal_mode=manual-drive，"
+                     "等待人工摆放目标点", seed)
+            self._send({
+                "type": "human",
+                "action": "record_goal",
+                "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')",
+            })
+        else:
+            # relative 模式：只需摆起点，goal 由 start + goal_relative 计算
+            self.state = "RECORD_START"
+            log.info("reset 收到，seed=%s，goal_mode=relative，"
+                     "goal=(%.2f, %.2f)，等待人工摆放起点",
+                     seed, self.goal_relative.x, self.goal_relative.y)
+            self._send({
+                "type": "human",
+                "action": "record_start",
+                "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
+            })
+
+    def _start_episode(self):
+        """从已记录的 start_abs 和 goal_abs 开始一局，发初始 obs。"""
+        self.episode_id += 1
+        self.step_id = 0
+        self.episode_t = 0.0
+        self.current_action = (0.0, 0.0)
+        self.state = "RUNNING"
+        log.info("episode %d 开始: start=(%.3f,%.3f) goal=(%.3f,%.3f)",
+                 self.episode_id, self.start_abs.x, self.start_abs.y,
+                 self.goal_abs.x, self.goal_abs.y)
+        obs = self._build_obs()
+        self._send(obs)
+
+    def _handle_human_confirm(self, msg: dict):
+        action = msg.get("action")
+        current = self._get_current_pose()
+
+        if action == "record_goal":
+            if self.state != "RECORD_GOAL":
+                self._error("WRONG_STATE",
+                            f"当前不是 RECORD_GOAL 状态，而是 {self.state}")
+                return
+            if current is None:
+                self._error("INTERNAL", "尚未收到 /odom，无法记录目标点")
+                return
+            self.goal_abs = Pose2D(current.x, current.y, current.yaw)
+            log.info("记录目标点: x=%.3f y=%.3f yaw=%.3f",
+                     current.x, current.y, current.yaw)
+            if self.goal_mode == "manual-drive":
+                self.state = "DRIVE_TO_START"
+                self._send({
+                    "type": "human",
+                    "action": "drive_to_start",
+                    "detail": "请用键盘遥控把车开到起点（可以任意旋转朝向），到位后发送 human_confirm('drive_to_start')",
+                })
+            else:
+                self.state = "RECORD_START"
+                self._send({
+                    "type": "human",
+                    "action": "record_start",
+                    "detail": "请把车放到起点（任意朝向），摆好后发送 human_confirm('record_start')",
+                })
+
+        elif action == "drive_to_start":
+            if self.state != "DRIVE_TO_START":
+                self._error("WRONG_STATE",
+                            f"当前不是 DRIVE_TO_START 状态，而是 {self.state}")
+                return
+            if current is None:
+                self._error("INTERNAL", "尚未收到 /odom，无法记录起点")
+                return
+            self.start_abs = Pose2D(current.x, current.y, current.yaw)
+            dx = self.start_abs.x - self.goal_abs.x
+            dy = self.start_abs.y - self.goal_abs.y
+            dist = math.hypot(dx, dy)
+            log.info("记录起点: x=%.3f y=%.3f yaw=%.3f (距目标 %.3fm)",
+                     current.x, current.y, current.yaw, dist)
+            if dist < 0.3:
+                self._send({
+                    "type": "human",
+                    "action": "drive_to_start",
+                    "detail": f"警告：起点距目标只有 {dist:.2f}m，请继续把车开远一些，到位后再发送 human_confirm('drive_to_start')",
+                })
+            self._start_episode()
+
+        elif action == "record_start":
+            if self.state != "RECORD_START":
+                self._error("WRONG_STATE",
+                            f"当前不是 RECORD_START 状态，而是 {self.state}")
+                return
+            if current is None:
+                self._error("INTERNAL", "尚未收到 /odom，无法记录起点")
+                return
+            self.start_abs = Pose2D(current.x, current.y, current.yaw)
+            log.info("记录起点: x=%.3f y=%.3f yaw=%.3f",
+                     current.x, current.y, current.yaw)
+
+            if self.goal_mode == "relative":
+                # 相对目标点：goal = start + goal_relative
+                self.goal_abs = Pose2D(
+                    self.start_abs.x + self.goal_relative.x,
+                    self.start_abs.y + self.goal_relative.y,
+                    self.start_abs.yaw,
+                )
+
+            self._start_episode()
+
+        else:
+            self._error("BAD_FIELD", f"未知的 human_confirm action: {action}")
+
+    def _handle_teleop(self, msg: dict):
+        """DRIVE_TO_START 阶段遥控：直接发布 /cmd_vel。"""
+        if self.state != "DRIVE_TO_START":
+            self._error("WRONG_STATE",
+                        f"teleop 只能在 DRIVE_TO_START 状态发，当前 {self.state}")
+            return
+        v = float(msg.get("v", 0.0))
+        w = float(msg.get("w", 0.0))
+        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
+        log.info("teleop: v=%.3f w=%.3f", v, w)
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
+
+    def _handle_action(self, msg: dict):
+        if self.state != "RUNNING":
+            self._error("WRONG_STATE",
+                        f"action 只能在 RUNNING 状态发，当前 {self.state}")
+            return
+
+        if msg.get("episode_id") != self.episode_id:
+            self._error("BAD_FIELD",
+                        f"episode_id 不匹配: 期望 {self.episode_id}, 收到 {msg.get('episode_id')}")
+            return
+        if msg.get("step_id") != self.step_id:
+            self._error("BAD_FIELD",
+                        f"step_id 不匹配: 期望 {self.step_id}, 收到 {msg.get('step_id')}")
+            return
+
+        if self._step_in_progress:
+            self._error("WRONG_STATE", "上一个 action 尚未执行完，请勿重发")
+            return
+
+        v = float(msg.get("v", 0.0))
+        w = float(msg.get("w", 0.0))
+        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
+
+        self._step_task = asyncio.create_task(self._run_step(v, w))
+
+    def _handle_all_finish(self, msg: dict):
+        log.info("all_finish 收到，准备退出: %s", msg)
+        self.state = "FINISHED"
+        self.current_action = (0.0, 0.0)
+        self._stop_cmd_vel_loop()
+        self._send({"type": "bye", "reason": "all_finish received"})
+        self._stop_event.set()
+
+    async def _handle_message(self, raw: str):
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError as e:
+            self._error("BAD_JSON", str(e))
+            return
+
+        mtype = msg.get("type")
+        if mtype == "reset":
+            self._handle_reset(msg)
+        elif mtype == "action":
+            self._handle_action(msg)
+        elif mtype == "teleop":
+            self._handle_teleop(msg)
+        elif mtype == "all_finish":
+            self._handle_all_finish(msg)
+        elif mtype == "human_confirm":
+            self._handle_human_confirm(msg)
+        else:
+            self._error("BAD_TYPE", f"未知消息类型: {mtype}")
+
+    # ---------------- WebSocket server ----------------
+    async def _ws_handler(self, websocket: WebSocketServerProtocol, path: str):
+        if self.websocket is not None:
+            log.warning("已有 client 连接，拒绝新连接")
+            await websocket.close(1013, "server busy")
+            return
+
+        log.info("client 已连接: %s", websocket.remote_address)
+        self.websocket = websocket
+        self.state = "WAIT_RESET"
+        self._handle_hello()
+
+        try:
+            async for raw in websocket:
+                await self._handle_message(raw)
+        except websockets.exceptions.ConnectionClosed:
+            log.info("client 断开")
+        finally:
+            self.websocket = None
+            self.current_action = (0.0, 0.0)
+            self._stop_cmd_vel_loop()
+            self.state = "WAIT_RESET"
+
+    async def run_server(self):
+        log.info("启动 WebSocket server: 0.0.0.0:%d", self.port)
+        async with websockets.serve(
+            self._ws_handler, "0.0.0.0", self.port,
+            ping_interval=None, ping_timeout=None,
+        ):
+            await self._stop_event.wait()  # 等待退出信号
+
+
+def main():
+    parser = argparse.ArgumentParser(description="A2 真机 WebSocket Server")
+    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument(
+        "--lidar-front-offset-deg", type=float, default=0.0,
+        help="雷达 0° 相对于车头正前的偏移（度）。正数表示车头正前在雷达原始 0° 的左侧"
+    )
+    parser.add_argument("--log-dir", type=Path, default=Path("~/a2_real_robot_logs"))
+    parser.add_argument(
+        "--goal-mode", type=str, default="manual-drive",
+        choices=["relative", "manual-drive"],
+        help="目标点设定方式：relative=由起点相对偏移计算（测试用）；"
+             "manual-drive=先摆放目标点，再推车/开车到起点（训练用）"
+    )
+    parser.add_argument(
+        "--goal-relative-x", type=float, default=2.0,
+        help="relative 模式下目标点相对于起点的 x 偏移（米，车头前为正）"
+    )
+    parser.add_argument(
+        "--goal-relative-y", type=float, default=0.0,
+        help="relative 模式下目标点相对于起点的 y 偏移（米，左侧为正）"
+    )
+    args = parser.parse_args()
+
+    rclpy.init()
+    node = RealRobotServer(args)
+
+    executor = MultiThreadedExecutor()
+    executor.add_node(node)
+    ros_thread = threading.Thread(target=executor.spin, daemon=True)
+    ros_thread.start()
+
+    try:
+        asyncio.run(node.run_server())
+    except KeyboardInterrupt:
+        log.info("收到 Ctrl+C，退出")
+    finally:
+        node._stop_cmd_vel_loop()
+        executor.shutdown()
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == "__main__":
+    main()

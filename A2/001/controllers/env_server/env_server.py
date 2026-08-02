@@ -99,8 +99,13 @@ def wrap_pi(a: float) -> float:
 class EnvServer:
     def __init__(self):
         self.robot = Supervisor()
-        # 加速仿真（不影响仿真时间语义）
-        self.robot.simulationSetMode(Supervisor.SIMULATION_MODE_FAST)
+        # 仿真速度：训练默认 FAST（最大化吞吐）；GUI 观看演示时用
+        # ENV_SIM_MODE=realtime（由启动命令设置，WSLENV 透传）
+        if os.environ.get("ENV_SIM_MODE", "fast") == "realtime":
+            self.robot.simulationSetMode(
+                Supervisor.SIMULATION_MODE_REAL_TIME)
+        else:
+            self.robot.simulationSetMode(Supervisor.SIMULATION_MODE_FAST)
 
         # ---- 设备 ----
         self.lidar = self.robot.getDevice("lidar")

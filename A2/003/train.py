@@ -43,7 +43,8 @@ from sac import SACAgent
 
 log = logging.getLogger("train")
 
-BUFFER_CAPACITY = 200_000     # api.md §6.3：replay buffer 容量
+BUFFER_CAPACITY = 500_000     # api.md §6.3：replay buffer 容量（08-02 起 50 万，
+                              # 与 train_async.py 一致；容纳 14.3 万演示 + 在线数据）
 WARMUP = 5_000                # api.md §6.3：buffer 少于 5000 条不更新
 BYE_TIMEOUT_S = 5.0           # api.md §2.5：等 bye 超时（秒）
 
@@ -65,6 +66,36 @@ async def recv_msg(ws) -> dict:
         raise ProtocolError(f"server error: code={msg.get('code')} "
                             f"detail={msg.get('detail')}")
     return msg
+
+
+def human_confirm_payload(action: str) -> dict:
+    """§2.9：对 human 消息的确认。"""
+    return {"type": "human_confirm", "action": action}
+
+
+async def recv_msg_handle_human(ws, auto_confirm: bool = False) -> dict:
+    """
+    收一条消息；若是真机 server 的 human 消息，则提示线下操作并回复确认，
+    然后继续收下一条，直到拿到非 human 消息为止。
+    """
+    while True:
+        msg = await recv_msg(ws)
+        if msg.get("type") != "human":
+            return msg
+        action = msg.get("action", "unknown")
+        detail = msg.get("detail", "")
+        log.warning("[HUMAN ACTION REQUIRED] %s: %s", action, detail)
+        if auto_confirm:
+            log.warning("自动发送 human_confirm(%s)", action)
+        else:
+            # 交互式提示：阻塞等线下人员按回车
+            try:
+                print(f"\n>>> [需要人工操作] {detail}\n完成后按回车继续...",
+                      flush=True)
+                input()
+            except EOFError:
+                log.warning("非交互终端，自动发送 human_confirm(%s)", action)
+        await ws.send(json.dumps(human_confirm_payload(action)))
 
 
 def validate_hello(hello: dict) -> dict:
@@ -156,7 +187,7 @@ async def run_episode(ws, cfg, agent, buffer, args, *, seed: int,
     - train=False：确定性策略（取 mean）、不存 buffer（评估局，§6.7）
     """
     await ws.send(json.dumps(reset_payload(seed, override)))
-    obs = await recv_msg(ws)
+    obs = await recv_msg_handle_human(ws, auto_confirm=args.auto_human)
     if obs.get("type") != "obs":
         raise ProtocolError(f"reset 后未收到 obs: {obs}")
 
@@ -440,6 +471,9 @@ def parse_args(argv=None):
     ap.add_argument("--converge-consecutive", type=int,
                     default=CONVERGE_CONSECUTIVE)
     ap.add_argument("--converge-rate", type=float, default=CONVERGE_RATE)
+    # 真机模式（api.md §2.8 / §2.9）：自动回复 human_confirm，不暂停等人工
+    ap.add_argument("--auto-human", action="store_true",
+                    help="真机模式下自动发送 human_confirm，不暂停等线下操作（调试用）")
     return ap.parse_args(argv)
 
 

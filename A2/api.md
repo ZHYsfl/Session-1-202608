@@ -54,7 +54,7 @@
 - **003**：WebSocket **client**，实现 SAC 训练/推理主循环；**唯一**与 001 通信的一方；进程内 import 009 的 model.py。
 - **009**：纯 Python 模块，不联网、不碰仿真，只定义网络结构与权重存取。
 
-后期 002/006 的真机驱动程序替换 001 的位置（同样的 server、同样的消息），003/009 零改动。
+后期 002/006 的真机驱动程序替换 001 的位置（同样的 server、同样的消息），003/009 零改动。当前真机实现位于 `A2/real_robot/`，运行说明见该目录 `run_a2_real_robot.sh`。由于真机没有 supervisor，真机 server 在 `reset` 流程中扩展了 `human` / `human_confirm` 消息用于人工介入（§2.8、§2.9、§3.4），003 需在真机模式下支持这两种消息。
 
 ---
 
@@ -68,6 +68,8 @@
 | `action` | client → server | 对某条 obs 的回应，一一对应 |
 | `all_finish` | client → server | 训练收敛/终止 |
 | `bye` | server → client | 收到 all_finish 后回应，随后关连接 |
+| `human` | server → client | 真机模式下需要线下人工操作时发送 |
+| `human_confirm` | client → server | 线下人工操作完成后回复 server |
 | `error` | 双向 | 任何非法消息/状态错误 |
 
 ### 2.1 hello（server → client）
@@ -262,6 +264,43 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 
 收到 error 后双方记录日志并退出（v1 不做恢复）。
 
+### 2.8 human（server → client）【真机扩展】
+
+**仅真机 server 使用**。Webots 仿真环境由 supervisor 自动重置，不需要此消息；真机没有 supervisor，每次 `reset` 后必须线下人工摆放车辆/障碍物，因此 server 通过 `human` 消息暂停流程、提示当前需要人工做什么。
+
+```json
+{
+  "type": "human",
+  "action": "record_goal",
+  "detail": "请把车放到目标点，摆好后发送 human_confirm('record_goal')"
+}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| type | string | 固定 "human" |
+| action | string | 当前需要人工执行的动作，目前定义：`record_goal`（记录目标点）、`drive_to_start`（把车遥控开到起点）、`record_start`（记录起点） |
+| detail | string | 可读的线下操作提示 |
+
+client（003 或任何人工操作客户端）收到后应**阻塞等待线下人员完成操作**，再回复对应的 `human_confirm`。训练脚本里可以把 detail 打印到屏幕或播放提示音。
+
+**遥控开车到起点**：真机 `/odom` 由车轮编码器积分得到，只能跟踪车轮移动，不能跟踪人手搬车。因此必须先摆目标点，再遥控开车到起点，让 odom 记录真实位移。若两点间靠手搬，goal 与 start 的 odom 坐标会重合，导致 `goal_reached` 立即触发。
+
+### 2.9 human_confirm（client → server）【真机扩展】
+
+对 `human` 消息的确认，告诉 server 线下操作已完成。
+
+```json
+{"type": "human_confirm", "action": "record_goal"}
+```
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| type | string | 固定 "human_confirm" |
+| action | string | 必须与收到的 `human.action` 一致 |
+
+真机 reset 的完整时序见 §3.4。
+
 ---
 
 ## 3. 状态机与完整运作流程
@@ -276,6 +315,8 @@ RUNNING ──obs.done=true──▶ WAIT_RESET
 WAIT_RESET ──收到 all_finish──▶ 发 bye ──▶ 关闭
 其余消息 → 回 error 并退出
 ```
+
+**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
 
 ### 3.2 完整时序
 
@@ -323,6 +364,32 @@ for episode in range(MAX_EPISODES):
 send(all_finish(...)); recv()  # bye
 save_checkpoint(...); exit()
 ```
+
+### 3.4 真机模式下的 reset 时序（human-in-the-loop）
+
+真机 server 替换 001 后，`reset` 不再由 supervisor 自动重置世界，而是需要线下人工摆放车辆与障碍物。因此时序扩展如下：
+
+```
+client(003/人工客户端)              server(真机 001-replacement)
+   │──── connect ─────────────────▶│
+   │◀──────────── hello ───────────│  env_name="real_diffbot_v1"
+   │──── reset(seed=...) ─────────▶│
+   │◀──── human(record_goal) ──────│  提示：把车放到目标点
+   │      （线下摆车）              │
+   │──── human_confirm ───────────▶│  server 记录当前 /odom 为 goal
+   │◀──── human(drive_to_start) ─────│  提示：把车遥控开到起点
+   │      （线下遥控开车，可旋转）  │
+   │──── human_confirm ───────────▶│  server 记录当前 /odom 为 start
+   │◀──────── obs(ep=1, s=0) ──────│  开始这一局
+   │──── action(ep=1, s=0) ───────▶│
+   │              ……                │
+```
+
+**关键说明**：
+- 真机 server 的 `hello.env_name` 为 `"real_diffbot_v1"`，与 Webots 的 `"webots_diffbot_v1"` 区分；`protocol_version` 仍为 `1.1`，`config` 与仿真一致，保证 003/009 的校验逻辑不变。
+- `human` / `human_confirm` 是 001 真机侧的扩展消息。Webots 仿真 server 不发这两种消息；003 在收到时应判断：若 `type == "human"`，则暂停并提示线下操作，操作完成后再发 `human_confirm`。
+- 遥控开车要求：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；若手搬，goal 与 start 的 odom 坐标重合，会导致 `goal_reached` 在 step 0 触发。
+- 目标点与起点均通过当前 `/odom` 位姿记录，后续 `goal.dist` / `goal.bearing` 均相对起点计算。
 
 ---
 
@@ -394,6 +461,18 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 ### 5.5 日志
 
 每 episode 结束写一行 CSV：`episode_id, steps, outcome, min_lidar_ever, final_dist, seed`（前五列见上；`seed` 为附加列，记录本局实际使用的种子，便于复现场景）。
+
+### 5.6 真机实现补充（A2/real_robot/）
+
+真机 server 与 Webots 仿真的差异点：
+
+1. **传感器来源**：`lidar[64]` 由 `/scan`（Delta-2G，288 点/圈，约 6.7 Hz）重采样而来；`vel{v,w}` 取自 `/odom.twist`；`goal` 由 `record_goal` 时记录的 `/odom` 位姿与 `drive_to_start` 时记录的 `/odom` 位姿相减得到。
+2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。
+3. **重采样与中位数滤波**：288 点按角度最近邻重采样为 64 线；对 64 线结果做 3 邻域环形中位数滤波；`inf`/无效值替换为 `lidar_max_range`。
+4. **动作执行**：收到 `(v,w)` 后 clip 到 `±v_max/±w_max`，以 50 Hz 向 `/cmd_vel` 发布 Twist，持续 `control_dt=0.1 s`，然后读取最新传感器数据并回 `obs`。
+5. **坐标系约定**：`drive_to_start` 时把车所在位置视为该 episode 的局部坐标原点；目标点坐标为 `record_goal` 时的 `/odom` 位姿。因此 episode 内 `goal.dist` / `goal.bearing` 均相对于起点计算，依赖 `/odom` 的短时精度。
+6. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
+7. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免串口冲突。见 `run_a2_real_robot.sh`。
 
 ---
 
@@ -523,8 +602,10 @@ def load_checkpoint(path: str, models: dict,
 2. **003 并行开发**：自写一个 20 行 echo server 桩（收到 action 就回一条伪造 obs），先把 SAC 主循环跑通；
 3. **001 并行开发**：自写一个 20 行随机 client 桩（收到 obs 回随机 action），先把环境推进跑通；
 4. 三方联调：hello 校验 → 单 episode 全流程 → 多 episode → 收敛测试；
-5. 联调通过后，002/006 按 §1 末尾机制启动真机适配。
+5. 联调通过后，002/006 按 §1 末尾机制启动真机适配；真机 server 的 `hello.env_name` 为 `"real_diffbot_v1"`，并扩展 `human`/`human_confirm` 消息（§2.8、§2.9、§3.4、§5.6）。
 
 ## 9. 变更管理
 
 任何字段、常量、流程的改动：改本文档 → 升 protocol_version 次版本号 → 群里通知三方 → 三方同步改代码。主版本号变更表示不兼容改动，client/server 必须拒绝连接。
+
+**例外**：真机适配所需的 `human` / `human_confirm` 消息属于 env-specific 扩展，不改变 `hello`/`reset`/`obs`/`action`/`all_finish`/`bye` 的核心语义，也不改变观测/动作空间的数值含义，因此不升 protocol_version。003 可通过 `hello.env_name == "real_diffbot_v1"` 判断是否启用 human 处理。

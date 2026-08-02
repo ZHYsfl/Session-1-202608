@@ -42,7 +42,8 @@ from sac import SACAgent
 log = logging.getLogger("train_async")
 
 WARMUP = 5_000            # api.md §6.3：buffer 少于 5000 条不更新
-BUFFER_CAPACITY = 200_000
+BUFFER_CAPACITY = 500_000  # 2026-08-02 起 50 万：新世界演示 14.3 万条预填后仍留
+                           # ~71% 空间给在线数据，避免演示主导采样（run7 平台教训）
 MAX_PENDING = 5_000       # learner 落后上限：超了丢过期更新量，防数据无限过时
 
 
