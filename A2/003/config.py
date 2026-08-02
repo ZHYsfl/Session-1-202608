@@ -68,5 +68,7 @@ CUR_SHORT_TIME = 30.0
 
 # ================= 连接 =================
 WS_URI = "ws://127.0.0.1:8765"
-PING_INTERVAL = 20              # 应用层不做心跳（§0），仅保持库级 ping 参数
-PING_TIMEOUT = 60
+# 应用层不做心跳（§0）；真机人工摆车阶段会阻塞数十秒，
+# 库级 ping 若超时会把连接掐掉，所以直接关闭。
+PING_INTERVAL = None
+PING_TIMEOUT = None

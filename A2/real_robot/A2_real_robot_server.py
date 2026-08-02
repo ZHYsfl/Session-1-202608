@@ -50,7 +50,7 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 import websockets
@@ -166,14 +166,9 @@ class RealRobotServer(Node):
         self.episode_t = 0.0
         self.goal_abs = Pose2D()
         self.start_abs = Pose2D()
-        self.current_action = (0.0, 0.0)
         self._last_seed = -1
         self._step_in_progress = False
         self._step_task: Optional[asyncio.Task] = None
-
-        # cmd_vel 发布循环
-        self._cmd_vel_loop_task: Optional[asyncio.Task] = None
-        self._stop_cmd_vel = False
 
         # server 退出信号
         self._stop_event = asyncio.Event()
@@ -235,18 +230,12 @@ class RealRobotServer(Node):
         # 因此 target=0 时应取 raw angle ≈ offset 的值
         raw_angles = raw_angles - self.lidar_front_offset_rad
 
-        target_angles = np.array([
-            normalize_angle(i * 2.0 * math.pi / n) for i in range(n)
-        ], dtype=np.float32)
-
-        out = np.empty(n, dtype=np.float32)
-        for i, ta in enumerate(target_angles):
-            diffs = np.empty(m, dtype=np.float32)
-            for j in range(m):
-                d = abs(normalize_angle(raw_angles[j] - ta))
-                diffs[j] = d
-            idx = int(np.argmin(diffs))
-            out[i] = ranges[idx]
+        target_angles = (np.arange(n, dtype=np.float32) * 2.0 * math.pi / n)
+        # 角度差归一化到 [-π, π]，再取绝对值
+        diffs = np.mod((raw_angles - target_angles[:, None]) + math.pi, 2.0 * math.pi) - math.pi
+        diffs = np.abs(diffs)
+        idx = np.argmin(diffs, axis=1)
+        out = ranges[idx]
         return out
 
     @staticmethod
@@ -336,47 +325,38 @@ class RealRobotServer(Node):
         }
 
     # ---------------- 控制循环 ----------------
-    async def _cmd_vel_loop(self):
-        """50Hz 持续发布当前动作；无动作时发零速"""
-        while rclpy.ok() and not self._stop_cmd_vel:
-            v, w = self.current_action
-            twist = Twist()
-            twist.linear.x = float(v)
-            twist.angular.z = float(w)
-            self.cmd_vel_pub.publish(twist)
-            await asyncio.sleep(0.02)
-        # 退出前再发一次零速
-        self.cmd_vel_pub.publish(Twist())
-
-    def _start_cmd_vel_loop(self):
-        if self._cmd_vel_loop_task is None or self._cmd_vel_loop_task.done():
-            self._stop_cmd_vel = False
-            self._cmd_vel_loop_task = asyncio.create_task(self._cmd_vel_loop())
-
-    def _stop_cmd_vel_loop(self):
-        self._stop_cmd_vel = True
-        self.cmd_vel_pub.publish(Twist())
+    def _publish_cmd(self, v: float, w: float):
+        """发布一次 /cmd_vel。"""
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
 
     # ---------------- episode 推进 ----------------
     async def _run_step(self, v: float, w: float):
         """执行一个 control_dt，然后发 obs"""
         self._step_in_progress = True
-        self.current_action = (v, w)
-        self._start_cmd_vel_loop()
+        t0 = time.time()
+        self._publish_cmd(v, w)
+        t1 = time.time()
 
         await asyncio.sleep(self.cfg["control_dt"])
+        t2 = time.time()
 
         self.step_id += 1
         self.episode_t = round(self.step_id * self.cfg["control_dt"], 3)
         obs = self._build_obs()
+        t3 = time.time()
         self._send(obs)
+        t4 = time.time()
 
         if obs["done"]:
             self._log_episode(obs)
             self.state = "WAIT_RESET"
-            self.current_action = (0.0, 0.0)
-            self._stop_cmd_vel_loop()
+            self._publish_cmd(0.0, 0.0)
 
+        log.info("step timing: publish=%.3f sleep=%.3f build_obs=%.3f send=%.3f total=%.3f",
+                 t1 - t0, t2 - t1, t3 - t2, t4 - t3, t4 - t0)
         self._step_in_progress = False
 
     def _log_episode(self, obs: dict):
@@ -460,7 +440,6 @@ class RealRobotServer(Node):
         self.episode_id += 1
         self.step_id = 0
         self.episode_t = 0.0
-        self.current_action = (0.0, 0.0)
         self.state = "RUNNING"
         log.info("episode %d 开始: start=(%.3f,%.3f) goal=(%.3f,%.3f)",
                  self.episode_id, self.start_abs.x, self.start_abs.y,
@@ -512,12 +491,6 @@ class RealRobotServer(Node):
             dist = math.hypot(dx, dy)
             log.info("记录起点: x=%.3f y=%.3f yaw=%.3f (距目标 %.3fm)",
                      current.x, current.y, current.yaw, dist)
-            if dist < 0.3:
-                self._send({
-                    "type": "human",
-                    "action": "drive_to_start",
-                    "detail": f"警告：起点距目标只有 {dist:.2f}m，请继续把车开远一些，到位后再发送 human_confirm('drive_to_start')",
-                })
             self._start_episode()
 
         elif action == "record_start":
@@ -590,8 +563,7 @@ class RealRobotServer(Node):
     def _handle_all_finish(self, msg: dict):
         log.info("all_finish 收到，准备退出: %s", msg)
         self.state = "FINISHED"
-        self.current_action = (0.0, 0.0)
-        self._stop_cmd_vel_loop()
+        self._publish_cmd(0.0, 0.0)
         self._send({"type": "bye", "reason": "all_finish received"})
         self._stop_event.set()
 
@@ -629,14 +601,16 @@ class RealRobotServer(Node):
         self._handle_hello()
 
         try:
-            async for raw in websocket:
+            while True:
+                raw = await websocket.recv()
                 await self._handle_message(raw)
+                # 让出控制权，确保 _run_step 等 task 能被调度
+                await asyncio.sleep(0)
         except websockets.exceptions.ConnectionClosed:
             log.info("client 断开")
         finally:
             self.websocket = None
-            self.current_action = (0.0, 0.0)
-            self._stop_cmd_vel_loop()
+            self._publish_cmd(0.0, 0.0)
             self.state = "WAIT_RESET"
 
     async def run_server(self):
@@ -675,7 +649,7 @@ def main():
     rclpy.init()
     node = RealRobotServer(args)
 
-    executor = MultiThreadedExecutor()
+    executor = SingleThreadedExecutor()
     executor.add_node(node)
     ros_thread = threading.Thread(target=executor.spin, daemon=True)
     ros_thread.start()
@@ -685,7 +659,7 @@ def main():
     except KeyboardInterrupt:
         log.info("收到 Ctrl+C，退出")
     finally:
-        node._stop_cmd_vel_loop()
+        node._publish_cmd(0.0, 0.0)
         executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()

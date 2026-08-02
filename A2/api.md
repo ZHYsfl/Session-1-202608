@@ -18,7 +18,7 @@
 | 方位角 bearing 约定 | 车身坐标系，车头方向为 0，左正右负，取值 (-π, π] | |
 | 动作范围 | v ∈ [-0.5, 0.5] m/s，w ∈ [-1.5, 1.5] rad/s | 发送方可发任意值，server 端 clip |
 | 归一化职责 | **001 发原始物理量；003 负责归一化打包；009 的网络只见归一化向量** | 见 §4 |
-| 连接保活 | 使用 WebSocket 库自带 ping/pong | 应用层不实现心跳 |
+| 连接保活 | 使用 WebSocket 库自带 ping/pong | 应用层不实现心跳；**真机模式下人工摆车可能阻塞数十秒，应关闭库级 ping/pong 或设置足够长的超时**，避免等待期间被误掐 |
 | 断线策略 | v1 不支持断线重连：连接断开双方直接退出，重新启动 | |
 | episode 终止原因 | 三种：`collision` / `goal_reached` / `timeout`，互斥 | 见 §5.4 |
 
@@ -70,6 +70,7 @@
 | `bye` | server → client | 收到 all_finish 后回应，随后关连接 |
 | `human` | server → client | 真机模式下需要线下人工操作时发送 |
 | `human_confirm` | client → server | 线下人工操作完成后回复 server |
+| `teleop` | client → server | 真机 `drive_to_start` 阶段遥控小车（临时扩展，不升协议版本） |
 | `error` | 双向 | 任何非法消息/状态错误 |
 
 ### 2.1 hello（server → client）
@@ -80,7 +81,7 @@
 {
   "type": "hello",
   "protocol_version": "1.1",
-  "env_name": "webots_diffbot_v1",
+  "env_name": "webots_diffbot_v1"  // 真机为 "real_diffbot_v1"
   "config": {
     "lidar_count": 64,
     "lidar_max_range": 3.5,
@@ -301,6 +302,22 @@ client（003 或任何人工操作客户端）收到后应**阻塞等待线下�
 
 真机 reset 的完整时序见 §3.4。
 
+### 2.10 teleop（client → server）【真机扩展】
+
+仅在 `DRIVE_TO_START` 阶段有效，由人工遥控客户端向 server 发送实时速度，server 直接转发到 `/cmd_vel`。属于真机人工介入的临时通道，**不改变 `action` 的语义**，也不影响训练时 003 与 server 之间的 `action`/`obs` 循环。
+
+```json
+{"type": "teleop", "v": 0.2, "w": 0.0}
+```
+
+| 字段 | 类型 | 单位 | 说明 |
+|---|---|---|---|
+| type | string | — | 固定 "teleop" |
+| v | float | m/s | 期望线速度，server 会 clip 到 `[-v_max, v_max]` |
+| w | float | rad/s | 期望角速度，server 会 clip 到 `[-w_max, w_max]` |
+
+**注意**：`teleop` 只用于把车开到起点；进入 `RUNNING` 后必须使用 `action` 消息驱动。`teleop` 不会触发 `obs` 返回，也不会推进 episode 时间。
+
 ---
 
 ## 3. 状态机与完整运作流程
@@ -316,7 +333,7 @@ WAIT_RESET ──收到 all_finish──▶ 发 bye ──▶ 关闭
 其余消息 → 回 error 并退出
 ```
 
-**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
+**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户通过 `teleop` 消息遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
 
 ### 3.2 完整时序
 
@@ -378,7 +395,7 @@ client(003/人工客户端)              server(真机 001-replacement)
    │      （线下摆车）              │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 goal
    │◀──── human(drive_to_start) ─────│  提示：把车遥控开到起点
-   │      （线下遥控开车，可旋转）  │
+   │      （线下发送 teleop 消息）  │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 start
    │◀──────── obs(ep=1, s=0) ──────│  开始这一局
    │──── action(ep=1, s=0) ───────▶│
@@ -467,12 +484,15 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 真机 server 与 Webots 仿真的差异点：
 
 1. **传感器来源**：`lidar[64]` 由 `/scan`（Delta-2G，288 点/圈，约 6.7 Hz）重采样而来；`vel{v,w}` 取自 `/odom.twist`；`goal` 由 `record_goal` 时记录的 `/odom` 位姿与 `drive_to_start` 时记录的 `/odom` 位姿相减得到。
-2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。
+2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。当前标定值已记录在 `A2/real_robot/README.md`。
 3. **重采样与中位数滤波**：288 点按角度最近邻重采样为 64 线；对 64 线结果做 3 邻域环形中位数滤波；`inf`/无效值替换为 `lidar_max_range`。
 4. **动作执行**：收到 `(v,w)` 后 clip 到 `±v_max/±w_max`，以 50 Hz 向 `/cmd_vel` 发布 Twist，持续 `control_dt=0.1 s`，然后读取最新传感器数据并回 `obs`。
 5. **坐标系约定**：`drive_to_start` 时把车所在位置视为该 episode 的局部坐标原点；目标点坐标为 `record_goal` 时的 `/odom` 位姿。因此 episode 内 `goal.dist` / `goal.bearing` 均相对于起点计算，依赖 `/odom` 的短时精度。
-6. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
-7. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免串口冲突。见 `run_a2_real_robot.sh`。
+6. **目标点设定模式**：真机 server 启动参数 `--goal-mode` 控制。
+   - `manual-drive`（默认，训练用）：`reset` 后先人工摆目标点 → `record_goal` → 遥控开车到起点 → `drive_to_start` → 开始 episode。
+   - `relative`（测试用）：`reset` 后只需摆起点，`goal` 由 `start + (goal_relative_x, goal_relative_y)` 计算。
+7. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
+8. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免 `/cmd_vel` 被覆盖。见 `run_a2_real_robot.sh`。
 
 ---
 

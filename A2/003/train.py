@@ -88,11 +88,11 @@ async def recv_msg_handle_human(ws, auto_confirm: bool = False) -> dict:
         if auto_confirm:
             log.warning("自动发送 human_confirm(%s)", action)
         else:
-            # 交互式提示：阻塞等线下人员按回车
+            # 交互式提示：等线下人员按回车；用 executor 避免阻塞 asyncio 事件循环
             try:
-                print(f"\n>>> [需要人工操作] {detail}\n完成后按回车继续...",
-                      flush=True)
-                input()
+                prompt = f"\n>>> [需要人工操作] {detail}\n完成后按回车继续..."
+                print(prompt, flush=True)
+                await asyncio.get_event_loop().run_in_executor(None, input, "")
             except EOFError:
                 log.warning("非交互终端，自动发送 human_confirm(%s)", action)
         await ws.send(json.dumps(human_confirm_payload(action)))
