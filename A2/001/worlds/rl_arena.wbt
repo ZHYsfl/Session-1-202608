@@ -315,14 +315,17 @@ DEF GOAL Transform {
   ]
 }
 
-# ---------- 差速底盘小车 ----------
-# 车身 0.26 x 0.20 x 0.10，外接圆半径 ~0.170 m；雷达安装高度 0.20 m
+# ---------- 运动学底盘机器人（无轮） ----------
+# 轮式动力学已移除：机器人按 (v, w) 做理想运动学积分（env_server.step_action
+# 每 10 ms 推进 yaw += w·dt、pos += v·dt·(cos yaw, sin yaw)），运动精确、
+# 无打滑/钩挂/卡死。碰撞判定与 api.md §5.3 一致：雷达滤波后 min < 0.18。
+# 车身：圆柱 r=0.16 h=0.12（底离地 0.02），顶置小圆台，雷达高度 0.20 m。
 DEF ROBOT Robot {
   translation 0 0 0
   rotation 0 0 1 0
   children [
     DEF BODY Solid {
-      translation 0 0 0.1
+      translation 0 0 0.08
       children [
         Shape {
           appearance PBRAppearance {
@@ -330,230 +333,25 @@ DEF ROBOT Robot {
             metalness 0.4
             roughness 0.5
           }
-          geometry Box {
-            size 0.26 0.2 0.1
+          geometry Cylinder {
+            height 0.12
+            radius 0.16
+          }
+        }
+        Shape {
+          appearance PBRAppearance {
+            baseColor 0.85 0.85 0.9
+            metalness 0.6
+            roughness 0.3
+          }
+          geometry Cylinder {
+            height 0.05
+            radius 0.05
           }
         }
       ]
       name "body"
-      # 纯视觉节点：碰撞几何集中在 ROBOT 根节点的 boundingObject（BODY 无 physics，
-      # 若自带 boundingObject 会被 Webots 忽略并告警 "collisions will have no effect"）
-      # 前后支撑由四个轮子承担（后轮驱动、前轮从动，见下方 HingeJoint）
-    }
-    HingeJoint {
-      jointParameters HingeJointParameters {
-        position 0
-        anchor -0.08 0.1 0.05
-        axis 0 1 0
-      }
-      device [
-        RotationalMotor {
-          name "left wheel motor"
-          maxVelocity 15
-          maxTorque 10
-        }
-        PositionSensor {
-          name "left wheel sensor"
-        }
-      ]
-      endPoint Solid {
-        translation -0.08 0.1 0.05
-        children [
-          # 视觉：黑色橡胶轮胎 + 银色轮毂，一眼可辨的圆形车轮（3cm 宽探出车侧）。
-          # 纯外观——boundingObject 仍是 h=0.02 r=0.05 的圆柱，物理参数不变。
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.04 0.04 0.04
-              roughness 0.9
-            }
-            geometry Cylinder {
-              height 0.03
-              radius 0.05
-            }
-          }
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.72 0.72 0.75
-              metalness 0.9
-              roughness 0.35
-            }
-            geometry Cylinder {
-              height 0.033
-              radius 0.026
-            }
-          }
-        ]
-        name "left_wheel"
-        boundingObject Cylinder {
-          height 0.02
-          radius 0.05
-        }
-        physics Physics {
-          density -1
-          mass 0.2
-        }
-      }
-    }
-    HingeJoint {
-      jointParameters HingeJointParameters {
-        position 0
-        anchor -0.08 -0.1 0.05
-        axis 0 1 0
-      }
-      device [
-        RotationalMotor {
-          name "right wheel motor"
-          maxVelocity 15
-          maxTorque 10
-        }
-        PositionSensor {
-          name "right wheel sensor"
-        }
-      ]
-      endPoint Solid {
-        translation -0.08 -0.1 0.05
-        children [
-          # 视觉：黑色橡胶轮胎 + 银色轮毂，一眼可辨的圆形车轮（3cm 宽探出车侧）。
-          # 纯外观——boundingObject 仍是 h=0.02 r=0.05 的圆柱，物理参数不变。
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.04 0.04 0.04
-              roughness 0.9
-            }
-            geometry Cylinder {
-              height 0.03
-              radius 0.05
-            }
-          }
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.72 0.72 0.75
-              metalness 0.9
-              roughness 0.35
-            }
-            geometry Cylinder {
-              height 0.033
-              radius 0.026
-            }
-          }
-        ]
-        name "right_wheel"
-        boundingObject Cylinder {
-          height 0.02
-          radius 0.05
-        }
-        physics Physics {
-          density -1
-          mass 0.2
-        }
-      }
-    }
-    # ---------- 前轮（HingeJoint + 电机：四轮驱动，与后轮共享同一 (v,w) 指令） ----------
-    # 教训：BallJoint 万向滚珠脚撑支撑点太少，运动中俯仰/横滚晃到 12~15°；
-    # 四轮布局支撑面为矩形，姿态稳定。四个轮子均为普通圆形车轮，同侧前后轮由
-    # 同一个 (v,w) 指令经差速运动学解算出相同角速度（env_server.step_action），
-    # 无独立轮速、无麦轮辊子，纯差速四驱底盘。
-    HingeJoint {
-      jointParameters HingeJointParameters {
-        position 0
-        anchor 0.08 0.1 0.05
-        axis 0 1 0
-      }
-      device [
-        RotationalMotor {
-          name "front left wheel motor"
-          maxVelocity 15
-          maxTorque 10
-        }
-      ]
-      endPoint Solid {
-        translation 0.08 0.1 0.05
-        children [
-          # 视觉：黑色橡胶轮胎 + 银色轮毂，一眼可辨的圆形车轮（3cm 宽探出车侧）。
-          # 纯外观——boundingObject 仍是 h=0.02 r=0.05 的圆柱，物理参数不变。
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.04 0.04 0.04
-              roughness 0.9
-            }
-            geometry Cylinder {
-              height 0.03
-              radius 0.05
-            }
-          }
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.72 0.72 0.75
-              metalness 0.9
-              roughness 0.35
-            }
-            geometry Cylinder {
-              height 0.033
-              radius 0.026
-            }
-          }
-        ]
-        name "front_left_wheel"
-        boundingObject Cylinder {
-          height 0.02
-          radius 0.05
-        }
-        physics Physics {
-          density -1
-          mass 0.1
-        }
-      }
-    }
-    HingeJoint {
-      jointParameters HingeJointParameters {
-        position 0
-        anchor 0.08 -0.1 0.05
-        axis 0 1 0
-      }
-      device [
-        RotationalMotor {
-          name "front right wheel motor"
-          maxVelocity 15
-          maxTorque 10
-        }
-      ]
-      endPoint Solid {
-        translation 0.08 -0.1 0.05
-        children [
-          # 视觉：黑色橡胶轮胎 + 银色轮毂，一眼可辨的圆形车轮（3cm 宽探出车侧）。
-          # 纯外观——boundingObject 仍是 h=0.02 r=0.05 的圆柱，物理参数不变。
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.04 0.04 0.04
-              roughness 0.9
-            }
-            geometry Cylinder {
-              height 0.03
-              radius 0.05
-            }
-          }
-          Shape {
-            appearance PBRAppearance {
-              baseColor 0.72 0.72 0.75
-              metalness 0.9
-              roughness 0.35
-            }
-            geometry Cylinder {
-              height 0.033
-              radius 0.026
-            }
-          }
-        ]
-        name "front_right_wheel"
-        boundingObject Cylinder {
-          height 0.02
-          radius 0.05
-        }
-        physics Physics {
-          density -1
-          mass 0.1
-        }
-      }
+      # 纯视觉节点：机器人整体为运动学模式（无 physics），不参与物理碰撞
     }
     DEF LIDAR Lidar {
       translation 0 0 0.2
@@ -571,11 +369,8 @@ DEF ROBOT Robot {
   controller "env_server"
   supervisor TRUE
   locked TRUE
-  # 碰撞盒（0.26 x 0.23 x 0.13，z∈[0.02,0.15]）把四个轮子整个包进车身轮廓：
-  # 教训——轮子碰撞体若凸出车身（侧面 1cm、底部 5cm），贴障滑行/转弯时轮缘会
-  # 钩住障碍物棱边（μ=1 摩擦下电机拽不动，车卡死到超时）；包进盒面后障碍只
-  # 与光滑盒面接触，轮子只管滚地。外接圆 hypot(0.13,0.115)=0.174 < robot_radius
-  # 0.18，碰撞判定半径不用改；盒底留 0.02 离地间隙，不影响轮子承重。
+  # 碰撞包络（文档用；运动学模式下无物理响应）：0.26 x 0.23 x 0.13，
+  # z∈[0.02,0.15]，外接圆 hypot(0.13,0.115)=0.174 < robot_radius 0.18（§5.3）。
   boundingObject Transform {
     translation 0 0 0.085
     children [
@@ -583,9 +378,5 @@ DEF ROBOT Robot {
         size 0.26 0.23 0.13
       }
     ]
-  }
-  physics Physics {
-    density -1
-    mass 4
   }
 }

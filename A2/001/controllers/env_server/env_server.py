@@ -106,20 +106,7 @@ class EnvServer:
         self.lidar = self.robot.getDevice("lidar")
         self.lidar.enable(PHYSICS_DT_MS)
         self.lidar.enablePointCloud()
-        # 四轮驱动：四个普通圆形车轮，同侧前后轮严格同角速度，
-        # 由同一个 (v,w) 指令经差速运动学解算（api.md §5.3），无独立轮速
-        self.motor_l = self.robot.getDevice("left wheel motor")
-        self.motor_r = self.robot.getDevice("right wheel motor")
-        self.motor_fl = self.robot.getDevice("front left wheel motor")
-        self.motor_fr = self.robot.getDevice("front right wheel motor")
-        self.pos_l = self.robot.getDevice("left wheel sensor")
-        self.pos_r = self.robot.getDevice("right wheel sensor")
-        self.motors = (self.motor_l, self.motor_r, self.motor_fl, self.motor_fr)
-        for m in self.motors:
-            m.setPosition(float("inf"))   # 速度控制模式
-            m.setVelocity(0.0)
-        for p in (self.pos_l, self.pos_r):
-            p.enable(PHYSICS_DT_MS)
+        self.yaw = 0.0   # 运动学朝向（无轮：由 (v,w) 直接积分，见 step_action）
 
         # ---- supervisor 节点句柄 ----
         self.self_node = self.robot.getSelf()
@@ -431,9 +418,8 @@ class EnvServer:
         self.tf_rotation.setSFRotation([0, 0, 1, float(self.rng.uniform(-math.pi, math.pi))])
         self.tf_goal.setSFVec3f([self.goal_xy[0], self.goal_xy[1], 0.005])
 
-        # 4) 停电机、清物理、静置几拍让传感器刷新
-        for m in self.motors:
-            m.setVelocity(0.0)
+        # 4) 运动学模式无电机；记录朝向并静置几拍让传感器刷新
+        self.yaw = float(self.tf_rotation.getSFRotation()[3])
         self.robot.simulationResetPhysics()
         for _ in range(3):
             self.robot.step(PHYSICS_DT_MS)
@@ -464,21 +450,19 @@ class EnvServer:
         v = float(np.clip(v, -V_MAX, V_MAX))
         w = float(np.clip(w, -W_MAX, W_MAX))
 
-        # 差速运动学：api.md §5.3  ω_r = (v + w*L/2)/R, ω_l = (v - w*L/2)/R
-        # 四驱：同侧前后轮严格同角速度，整车共享同一个 (v,w) 指令
-        omega_r = (v + w * WHEEL_TRACK / 2) / WHEEL_RADIUS
-        omega_l = (v - w * WHEEL_TRACK / 2) / WHEEL_RADIUS
-        self.motor_r.setVelocity(omega_r)
-        self.motor_fr.setVelocity(omega_r)
-        self.motor_l.setVelocity(omega_l)
-        self.motor_fl.setVelocity(omega_l)
-
-        pos_l_prev, pos_r_prev = self.pos_l.getValue(), self.pos_r.getValue()
-
-        # 推进 SUBSTEPS 个物理步，每个物理步都判碰撞（§5.3）
+        # 理想运动学积分（无轮，api.md §5.3）：yaw += w·dt, pos += v·dt·(cos,sin)
+        # 每 10 ms 子步推进一次并即时判碰撞（§5.3），运动精确、无动力学误差
         collision = False
         executed = 0
         for _ in range(SUBSTEPS):
+            dt_s = PHYSICS_DT_MS / 1000.0
+            self.yaw += w * dt_s
+            self.yaw = math.atan2(math.sin(self.yaw), math.cos(self.yaw))
+            x, y, z = self.tf_translation.getSFVec3f()
+            self.tf_translation.setSFVec3f([
+                x + v * math.cos(self.yaw) * dt_s,
+                y + v * math.sin(self.yaw) * dt_s, z])
+            self.tf_rotation.setSFRotation([0, 0, 1, self.yaw])
             if self.robot.step(PHYSICS_DT_MS) == -1:
                 raise SystemExit("Webots 仿真已退出")
             executed += 1
@@ -529,11 +513,9 @@ class EnvServer:
                 break
 
         dt = executed * PHYSICS_DT_MS / 1000.0
-        # 实测速度：由轮速（编码器）换算，api.md §2.3
-        om_l = (self.pos_l.getValue() - pos_l_prev) / dt
-        om_r = (self.pos_r.getValue() - pos_r_prev) / dt
-        v_meas = (om_l + om_r) * WHEEL_RADIUS / 2
-        w_meas = (om_r - om_l) * WHEEL_RADIUS / WHEEL_TRACK
+        # 运动学模式：实测速度 = 指令速度（api.md §2.3 obs 的 v/w 字段）
+        v_meas = v
+        w_meas = w
 
         # 终止判定，优先级 collision > goal_reached > timeout（§5.4）
         x, y, yaw = self._pose()
@@ -548,8 +530,6 @@ class EnvServer:
             outcome = ("collision" if collision else
                        "goal_reached" if goal_reached else "timeout")
             self._log_episode(outcome, math.hypot(self.goal_xy[0] - x, self.goal_xy[1] - y))
-            for m_ in self.motors:
-                m_.setVelocity(0.0)
         return obs
 
     def _log_episode(self, outcome, final_dist):
@@ -564,8 +544,7 @@ class EnvServer:
               f"拦尖峰={self.spikes_suppressed}]", flush=True)
 
     def stop_motors(self):
-        for m in self.motors:
-            m.setVelocity(0.0)
+        pass  # 运动学模式无电机；保留接口兼容调用方（handle_client/main 退出路径）
 
 
 # ================= WebSocket 协议层 =================

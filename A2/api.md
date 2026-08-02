@@ -182,8 +182,8 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 | lidar | float[64] | m | 距离值，逆时针排列，第 0 条为车头正前；**无效回波已替换为 lidar_max_range**（不得出现 inf/nan）；数值已 clip 到 [0, max_range]；**已过 3 邻域中位数滤波**（每根射线取与左右邻居的中位数，见 §5.3 注） |
 | goal.dist | float | m | 目标到车中心距离，≥0 |
 | goal.bearing | float | rad | 目标在车身坐标系的方位角，(-π, π] |
-| vel.v | float | m/s | 由轮速换算的实测线速度（非指令值） |
-| vel.w | float | rad/s | 由轮速换算的实测角速度 |
+| vel.v | float | m/s | 实测线速度。当前 Webots 环境为**无轮运动学底盘**（(v,w) 直接积分驱动，见 §5.3），故等于指令值；换回轮式动力学或真机时才是编码器换算值 |
+| vel.w | float | rad/s | 实测角速度，同上 |
 | flags.collision | bool | — | 本步发生碰撞 |
 | flags.goal_reached | bool | — | 本步到达目标 |
 | flags.timeout | bool | — | 本步达到 max_episode_time |
@@ -211,7 +211,7 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 
 ### 2.5 all_finish（client → server）
 
-**作用**：告诉 server "整个训练任务彻底结束了，关机收工"。注意和 `reset` 区分：`reset` 是"这一局打完，开下一局"，训练要发成百上千次；`all_finish` 是"全部训练结束，环境可以关掉了"，**整个训练过程只发一次**。server 收到后会停掉电机、回一条 `bye`、关闭连接并结束仿真进程。
+**作用**：告诉 server "整个训练任务彻底结束了，关机收工"。注意和 `reset` 区分：`reset` 是"这一局打完，开下一局"，训练要发成百上千次；`all_finish` 是"全部训练结束，环境可以关掉了"，**整个训练过程只发一次**。server 收到后会回一条 `bye`、关闭连接并结束仿真进程。
 
 **三个发送时机，对应 reason 的三个取值**：
 
@@ -231,7 +231,7 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 | reason | string | 是 | 三选一：`"converged"` / `"interrupted"` / `"error"`，见上表 |
 | total_episodes | int | 是 | 本次训练累计跑过的 episode 总数（含最后这局），纯统计用途，server 记日志用，不影响行为 |
 
-**server 收到后的内部流程**：把电机速度置 0（车停下来，防止仿真空转时车还在动）→ 回 `bye` → 关闭 WebSocket 连接 → 结束仿真进程。之后想重新训练，需要重启 Webots/控制器。
+**server 收到后的内部流程**：停止推进（运动学模式无电机）→ 回 `bye` → 关闭 WebSocket 连接 → 结束仿真进程。之后想重新训练，需要重启 Webots/控制器。
 
 **client 发出后的流程**：阻塞等待 server 的 `bye`（正常应立即收到）→ 保存最终 checkpoint 和日志 → 退出。等不到（如 server 已崩溃）则设 5 秒超时，超时直接保存退出。
 
@@ -286,7 +286,7 @@ client(003)                        server(001)
    │──── reset(seed=42) ──────────▶│  内部: RNG 初始化→随机障碍→放车→定目标
    │◀──────── obs(ep=1, s=0) ──────│
    │  打包观测向量→009 推理→缩放     │
-   │──── action(ep=1, s=0) ───────▶│  内部: clip→轮速换算→推进0.1s→判终止
+   │──── action(ep=1, s=0) ───────▶│  内部: clip→运动学积分→推进0.1s→判终止
    │◀──────── obs(ep=1, s=1) ──────│
    │              ……                │
    │◀────── obs(done=true) ────────│  本 episode 结束
@@ -364,7 +364,7 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 
 ### 5.1 Webots 世界
 
-- 差速小车：box 车身 + 左右驱动轮（RotationalMotor）+ 万向球轮；记录轮距 `L`、轮半径 `R`（写入代码注释，真机对齐时要用）。
+- **无轮运动学机器人**（2026-08-02 起）：圆柱车身（r=0.16、h=0.12），**无轮子、无电机、无 physics**——机器人整体为运动学模式，由 supervisor 按 (v, w) 直接积分移动（§5.3），运动精确无打滑/钩挂/卡死。碰撞判定与 §5.3 一致：雷达滤波后 `min(lidar) < robot_radius`（机器人不参与物理碰撞，障碍物仍为物理体）。
 - `Lidar` 节点：`horizontalFieldOfView=6.2832`、`numberOfLayers=1`、`resolution=64`、`maxRange=3.5`，装于车顶中心，记录安装高度。
 - robot 节点 `supervisor TRUE`、`basicTimeStep=10`。
 - 场地：4 m × 4 m 围墙；障碍物 5~8 个（box/cylinder 混合）；目标点放绿色标记柱便于肉眼调试。
@@ -374,17 +374,17 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 1. 用 seed 初始化 RNG（numpy `default_rng(seed)`，seed=-1 时随机取）；
 2. 随机采起点与目标点：两点间距 ≥ 2.0 m，不满足则重采（最多 200 次）；
 3. 随机激活 5~8 个障碍物并摆放（supervisor `setSFVec3f`：离起点/目标表面 ≥ 0.4 m，**障碍物表面两两间距 ≥ 0.55 m**——车身外接圆直径 0.36 m，间距小于它就存在物理上过不去的缝；100 次采不到合法位置则弃用该障碍物）；未激活的障碍物沉到地板下；
-4. 传送机器人（随机朝向）与目标标记 → 电机置 0 → `simulationResetPhysics()` → 静置 3 个物理步；
+4. 传送机器人（随机朝向，记录 yaw）与目标标记 → `simulationResetPhysics()` → 静置 3 个物理步；
 5. `episode_id += 1`，`step_id = 0`，`t = 0.0`；回初始 obs。
 
 ### 5.3 action 内部流程（每收到一条）
 
 1. 校验状态与 episode_id/step_id，不符回 error；
 2. clip `(v, w)`；
-3. 差速运动学换算轮速：`ω_r = (v + w·L/2) / R`，`ω_l = (v − w·L/2) / R`，设置电机速度；
-4. 推进 10 个物理步（共 0.1 s），**每个物理步**检查碰撞：该物理步**中位数滤波后**的 `min(lidar) < robot_radius` → 立即停推进，置 collision。
+3. 理想运动学积分（无轮）：每物理步 `yaw += w·dt`、`pos += v·dt·(cos yaw, sin yaw)`，supervisor `setSFVec3f/setSFRotation` 直接写位姿；
+4. 推进 10 个物理步（共 0.1 s），**每个物理步**先积分移动再检查碰撞：该物理步**中位数滤波后**的 `min(lidar) < robot_radius` → 立即停推进，置 collision。
    - **注（中位数滤波）**：Webots Lidar 在运动中会偶发孤立单射线尖峰（读数 0.05~0.18 m，但对应方向 0.3~3 m 内无任何实物，静止时不出现）。server 对整圈扫描做 3 邻域中位数滤波（每根射线取与左右相邻射线三根的中位数）：真实近物在近距离必被 ≥2 根相邻射线同时看到所以保留，孤立尖峰被抹除。**碰撞判定、obs 下发、客户端奖励用的都是这份滤波后的扫描**，全链路语义一致；
-5. 读取 lidar（`inf` → max_range → 中位数滤波）、supervisor 真值位姿（算 dist/bearing）、轮速反馈（换算实测 v、w：`v=(v_l+v_r)/2`，`w=(v_r−v_l)/L`）；
+5. 读取 lidar（`inf` → max_range → 中位数滤波）、supervisor 真值位姿（算 dist/bearing）；实测 v、w = 指令值（运动学模式无编码器）；
 6. 判 goal_reached（`dist ≤ goal_tolerance`）与 timeout（`t ≥ max_episode_time`）；组装 obs 发送。
 
 ### 5.4 终止判定优先级
