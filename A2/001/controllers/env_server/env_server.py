@@ -57,7 +57,7 @@ MIN_LINEAR_VEL = 0.0        # m/s，真机对齐：后方是雷达盲区（车�
 # max_range。真机实测原始角度 115°~215° + offset -61.88° ≈ 车体 177°~277°。
 LIDAR_OCCLUDED_BODY = (177.0, 277.0)
 ARENA_SIZE = 4.0            # m
-OBS_DIM = 68
+OBS_DIM = 132             # client 侧 2 帧雷达堆叠 + goal + vel（2026-08-02 升级）
 ACT_DIM = 2
 
 # 底盘几何（与 .wbt 一致；真机对齐时改这里）
@@ -82,7 +82,7 @@ WALL_INNER = ARENA_SIZE / 2 - 0.025  # 1.975
 CONFIG_KEYS = {
     "lidar_count": LIDAR_COUNT,
     "lidar_max_range": LIDAR_MAX_RANGE,
-    "obs_dim": OBS_DIM,
+    "obs_dim": OBS_DIM,          # 132：client 侧 2 帧雷达堆叠 + goal + vel
     "act_dim": ACT_DIM,
     "control_dt": CONTROL_DT,
     "max_episode_time": MAX_EPISODE_TIME,
@@ -395,19 +395,29 @@ class EnvServer:
         if config_override is not None:
             self.max_episode_time = float(config_override["max_episode_time"])
 
+        # 服务端课程学习（2026-08-02）：按 reset 次数分阶段，障碍由少到多、目标由近到远
+        self.reset_count = getattr(self, "reset_count", 0) + 1
+        rc = self.reset_count
+        if rc < 300:
+            cur_min_act, cur_max_act, cur_min_dist = 2, 4, 1.0
+        elif rc < 600:
+            cur_min_act, cur_max_act, cur_min_dist = 3, 5, 1.5
+        else:
+            cur_min_act, cur_max_act, cur_min_dist = MIN_ACTIVE, MAX_ACTIVE, START_GOAL_MIN_DIST
+
         # 场景生成：最多 200 次尝试，每次摆完障碍后做起点→目标栅格可达性检查，
         # 不可达（死局，禁止倒车后无解）就整体重采样（2026-08-02 修复）
         placed = []  # (x, y, r)
         for _ in range(200):
-            # 1) 采起点与目标（间距 >= 2.0 m）
+            # 1) 采起点与目标（间距 >= 课程阶段目标距离）
             sx, sy = self.rng.uniform(-ROBOT_SAMPLE_LIM, ROBOT_SAMPLE_LIM, 2)
             gx, gy = self.rng.uniform(-ROBOT_SAMPLE_LIM, ROBOT_SAMPLE_LIM, 2)
-            if math.hypot(gx - sx, gy - sy) < START_GOAL_MIN_DIST:
+            if math.hypot(gx - sx, gy - sy) < cur_min_dist:
                 continue
             self.goal_xy = (float(gx), float(gy))
 
             # 2) 随机摆 N 个障碍物（互不重叠、离起点/目标表面 >= 0.4 m）
-            n_active = int(self.rng.integers(MIN_ACTIVE, MAX_ACTIVE + 1))
+            n_active = int(self.rng.integers(cur_min_act, cur_max_act + 1))
             order = self.rng.permutation(N_OBSTACLES)
             placed = []
             for rank, obs_i in enumerate(order):

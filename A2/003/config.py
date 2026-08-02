@@ -42,7 +42,9 @@ TARGET_ENTROPY = -float(ACT_DIM)  # α 自动调节目标熵 = -ACT_DIM = -2
 W_APPROACH = 5.0                # × (dist_{t-1} − dist_t)，朝目标靠近
 R_GOAL_REACHED = 200.0          # 到达目标
 R_COLLISION = -200.0            # 碰撞
-R_TIME_STEP = -0.1              # 每步时间惩罚
+R_TIME_STEP = -0.5              # 每步时间惩罚（08-02 晚 -0.1→-0.5：帧堆叠+轻惩罚导致
+                                # "不动吸引子"——不动 60s 只亏 60 分远低于碰撞 -200；
+                                # 加重到 300 分逼策略必须行动）
 W_SMOOTH = 0.5                  # × (a − a_prev)²，动作平滑惩罚（v、w 各一份）
 # 密集障碍接近惩罚（run2 新增；run3 起 W_DANGER 3.0→8.0）：min(lidar) 进入 D_SAFE 内
 # 开始按深度线性惩罚，给"离碰撞还有多远"一个连续梯度。

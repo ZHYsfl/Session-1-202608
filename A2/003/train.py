@@ -479,7 +479,10 @@ async def amain(args) -> int:
                                            if rate >= args.converge_rate else 0)
 
                         # ---- 收敛（§6.8）：连续 3 次评估成功率 ≥90% ----
-                        if converge_streak >= args.converge_consecutive:
+                        # 注意：课程学习阶段（服务端 reset 计数）完成前不收敛，
+                        # 否则会过早停止（只学了简单场景），--converge-min-episode 设门槛
+                        if (converge_streak >= args.converge_consecutive
+                                and episode >= args.converge_min_episode):
                             log.info("收敛：连续 %d 次评估 ≥%.0f%%",
                                      args.converge_consecutive,
                                      100 * args.converge_rate)
@@ -562,6 +565,9 @@ def parse_args(argv=None):
     ap.add_argument("--converge-consecutive", type=int,
                     default=CONVERGE_CONSECUTIVE)
     ap.add_argument("--converge-rate", type=float, default=CONVERGE_RATE)
+    ap.add_argument("--converge-min-episode", type=int, default=0,
+                    help="课程学习完成前禁止收敛（仿真课程 3 阶段约 900 局，"
+                         "传 900 保证学完全部难度再判定收敛）")
     # 真机模式（api.md §2.8 / §2.9）：自动回复 human_confirm，不暂停等人工
     ap.add_argument("--auto-human", action="store_true",
                     help="真机模式下自动发送 human_confirm，不暂停等线下操作（调试用）")
