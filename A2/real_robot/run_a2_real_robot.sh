@@ -7,6 +7,10 @@ set -e
 source /opt/ros/jazzy/setup.bash
 source ~/ros2_ws/install/setup.bash
 
+# 与 start_app.service 启动的底盘节点保持一致
+export ROS_DOMAIN_ID=99
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+
 # 1. 停止卖家 APP，避免 rplidar 节点抢串口
 if command -v APP >/dev/null 2>&1; then
     echo "停止 APP..."
@@ -34,7 +38,7 @@ fi
 # 默认 manual-drive 训练模式，已标定的 lidar 偏移
 LIDAR_OFFSET="-61.88"
 echo "启动 A2 真机 WebSocket server (goal_mode=manual-drive, lidar_offset=${LIDAR_OFFSET})..."
-python3 ~/A2_real_robot_server.py \
+exec python3 ~/A2/real_robot/A2_real_robot_server.py \
     --lidar-front-offset-deg ${LIDAR_OFFSET} \
     --goal-mode manual-drive \
     "$@"

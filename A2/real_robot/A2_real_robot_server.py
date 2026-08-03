@@ -50,7 +50,7 @@ import numpy as np
 import rclpy
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import LaserScan
 import websockets
@@ -94,7 +94,7 @@ class RealRobotServer(Node):
     DEFAULT_CFG = {
         "lidar_count": 64,
         "lidar_max_range": 3.5,
-        "obs_dim": 68,
+        "obs_dim": 68,        # client 侧单帧打包（08-02 晚回退：弃用 132 帧堆叠）
         "act_dim": 2,
         "control_dt": 0.1,
         "max_episode_time": 60.0,
@@ -102,6 +102,9 @@ class RealRobotServer(Node):
         "w_max": 1.5,
         "goal_tolerance": 0.15,
         "robot_radius": 0.18,
+        "collision_dist": 0.18,   # 真机碰撞判定距离（m）：用户定 08-02 晚
+                                  # （= robot_radius 车皮半径；雷达 range_min=0.15m，
+                                  #  注意刹车滑行后可能轻微擦碰）
         "arena_size": 4.0,
     }
 
@@ -114,6 +117,8 @@ class RealRobotServer(Node):
         self.declare_parameter("scan_topic", "/scan")
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("lidar_front_offset_deg", args.lidar_front_offset_deg)
+        self.declare_parameter("lidar_occluded_deg", args.lidar_occluded_deg)
+        self.declare_parameter("min_linear_vel", args.min_linear_vel)
         self.declare_parameter("log_dir", str(args.log_dir))
         self.declare_parameter("goal_mode", args.goal_mode)
         self.declare_parameter("goal_relative_x", args.goal_relative_x)
@@ -131,6 +136,19 @@ class RealRobotServer(Node):
         self.odom_topic = self.get_parameter("odom_topic").value
         self.lidar_front_offset_rad = math.radians(
             self.get_parameter("lidar_front_offset_deg").value
+        )
+        # 车身遮挡扇区（雷达原始角度，度）：该角度内的读数被车身/外壳遮挡，
+        # 屏蔽为 max_range，避免碰撞误判与 obs 污染（2026-08-02 实测 120°~210°）。
+        # 注意：屏蔽后该方向对 RL 表现为"开阔"，因此必须配合 --min-linear-vel 0
+        # 禁止倒车，否则策略会倒向雷达盲区造成真碰撞。
+        occ = self.get_parameter("lidar_occluded_deg").value
+        if occ and "," in str(occ):
+            a0, a1 = (float(x) for x in str(occ).split(","))
+            self.lidar_occluded_rad = (math.radians(a0), math.radians(a1))
+        else:
+            self.lidar_occluded_rad = None
+        self.min_linear_vel = float(
+            self.get_parameter("min_linear_vel").value
         )
         self.log_dir = Path(self.get_parameter("log_dir").value).expanduser()
         self.log_dir.mkdir(parents=True, exist_ok=True)
@@ -154,6 +172,8 @@ class RealRobotServer(Node):
         self.latest_twist = (0.0, 0.0)  # (v, w)
         self.latest_scan_time = 0.0
         self.latest_odom_time = 0.0
+        self._scan_count = 0
+        self._odom_count = 0
 
         # 状态机
         # WAIT_RESET, RECORD_GOAL, DRIVE_TO_START, RECORD_START, RUNNING, FINISHED
@@ -166,14 +186,12 @@ class RealRobotServer(Node):
         self.episode_t = 0.0
         self.goal_abs = Pose2D()
         self.start_abs = Pose2D()
-        self.current_action = (0.0, 0.0)
         self._last_seed = -1
         self._step_in_progress = False
         self._step_task: Optional[asyncio.Task] = None
-
-        # cmd_vel 发布循环
-        self._cmd_vel_loop_task: Optional[asyncio.Task] = None
-        self._stop_cmd_vel = False
+        # 碰撞确认计数：min_lidar 需连续 COLLISION_CONFIRM_STEPS 步低于阈值
+        # 才判碰撞——真机雷达 <0.2m 有 1-2cm 抖动，单步误触发会喂假 -200
+        self._collision_streak = 0
 
         # server 退出信号
         self._stop_event = asyncio.Event()
@@ -188,6 +206,9 @@ class RealRobotServer(Node):
         with self._lock:
             self.latest_scan = msg
             self.latest_scan_time = time.time()
+        self._scan_count += 1
+        if self._scan_count % 10 == 0:
+            log.debug("scan callback #%d", self._scan_count)
 
     def _odom_callback(self, msg: Odometry):
         p = msg.pose.pose.position
@@ -198,6 +219,9 @@ class RealRobotServer(Node):
             self.latest_odom = Pose2D(p.x, p.y, yaw)
             self.latest_twist = (float(t.linear.x), float(t.angular.z))
             self.latest_odom_time = time.time()
+        self._odom_count += 1
+        if self._odom_count % 60 == 0:
+            log.debug("odom callback #%d", self._odom_count)
 
     # ---------------- 工具函数 ----------------
     def _send(self, msg: dict):
@@ -231,22 +255,24 @@ class RealRobotServer(Node):
 
         m = len(ranges)
         raw_angles = scan.angle_min + np.arange(m, dtype=np.float32) * scan.angle_increment
+        # 车身遮挡扇区（原始角度）：屏蔽为 max_range
+        if self.lidar_occluded_rad is not None:
+            a0, a1 = self.lidar_occluded_rad
+            if a0 <= a1:
+                mask = (raw_angles >= a0) & (raw_angles <= a1)
+            else:  # 跨 0°（如 350°~10°）
+                mask = (raw_angles >= a0) | (raw_angles <= a1)
+            ranges[mask] = max_range
         # 安装偏移：车头正前在 raw scan 中的角度 = offset
         # 因此 target=0 时应取 raw angle ≈ offset 的值
         raw_angles = raw_angles - self.lidar_front_offset_rad
 
-        target_angles = np.array([
-            normalize_angle(i * 2.0 * math.pi / n) for i in range(n)
-        ], dtype=np.float32)
-
-        out = np.empty(n, dtype=np.float32)
-        for i, ta in enumerate(target_angles):
-            diffs = np.empty(m, dtype=np.float32)
-            for j in range(m):
-                d = abs(normalize_angle(raw_angles[j] - ta))
-                diffs[j] = d
-            idx = int(np.argmin(diffs))
-            out[i] = ranges[idx]
+        target_angles = (np.arange(n, dtype=np.float32) * 2.0 * math.pi / n)
+        # 角度差归一化到 [-π, π]，再取绝对值
+        diffs = np.mod((raw_angles - target_angles[:, None]) + math.pi, 2.0 * math.pi) - math.pi
+        diffs = np.abs(diffs)
+        idx = np.argmin(diffs, axis=1)
+        out = ranges[idx]
         return out
 
     @staticmethod
@@ -260,6 +286,9 @@ class RealRobotServer(Node):
             c = arr[(i + 1) % n]
             out[i] = float(np.median([a, b, c]))
         return out
+
+    # 碰撞确认步数（控制周期 0.1s，3 步 = 0.3s 持续低于阈值才判碰撞）
+    COLLISION_CONFIRM_STEPS = 3
 
     # ---------------- 观测计算 ----------------
     def _get_current_pose(self) -> Optional[Pose2D]:
@@ -313,7 +342,11 @@ class RealRobotServer(Node):
         done = False
 
         min_lidar = min(lidar)
-        if min_lidar < self.cfg["robot_radius"]:
+        if min_lidar < self.cfg["collision_dist"]:
+            self._collision_streak += 1
+        else:
+            self._collision_streak = 0
+        if self._collision_streak >= self.COLLISION_CONFIRM_STEPS:
             flags["collision"] = True
             done = True
         elif dist <= self.cfg["goal_tolerance"]:
@@ -336,47 +369,68 @@ class RealRobotServer(Node):
         }
 
     # ---------------- 控制循环 ----------------
-    async def _cmd_vel_loop(self):
-        """50Hz 持续发布当前动作；无动作时发零速"""
-        while rclpy.ok() and not self._stop_cmd_vel:
-            v, w = self.current_action
-            twist = Twist()
-            twist.linear.x = float(v)
-            twist.angular.z = float(w)
-            self.cmd_vel_pub.publish(twist)
-            await asyncio.sleep(0.02)
-        # 退出前再发一次零速
-        self.cmd_vel_pub.publish(Twist())
+    def _publish_cmd(self, v: float, w: float):
+        """发布一次 /cmd_vel。"""
+        twist = Twist()
+        twist.linear.x = float(v)
+        twist.angular.z = float(w)
+        self.cmd_vel_pub.publish(twist)
 
-    def _start_cmd_vel_loop(self):
-        if self._cmd_vel_loop_task is None or self._cmd_vel_loop_task.done():
-            self._stop_cmd_vel = False
-            self._cmd_vel_loop_task = asyncio.create_task(self._cmd_vel_loop())
-
-    def _stop_cmd_vel_loop(self):
-        self._stop_cmd_vel = True
-        self.cmd_vel_pub.publish(Twist())
+    def _safety_clamp(self, v: float, w: float, safe_dist: float = 0.22) -> tuple:
+        """
+        遥控/动作安全保护：前方（车头 ±30°）障碍 < safe_dist 时禁止前进，
+        后方障碍 < safe_dist 时禁止后退。返回 clamped (v, w)。
+        雷达 range_min=0.15m，safe_dist 取 0.30 保证有刹车余量。
+        """
+        scan = self._get_latest_scan()
+        if scan is None or v == 0.0:
+            return v, w
+        try:
+            lidar = self._resample_lidar(scan)
+        except Exception:
+            return v, w
+        n = len(lidar)
+        if n == 0:
+            return v, w
+        arc = max(1, int(30.0 / 360.0 * n))          # ±30° 对应的线数
+        front = min(lidar[:arc] + lidar[n - arc:])   # index 0 = 车头正前
+        rear = min(lidar[n // 2 - arc:n // 2 + arc])
+        if v > 0 and front < safe_dist:
+            log.info("safety: 前方 %.2fm < %.2fm，禁止前进", front, safe_dist)
+            v = 0.0
+        if v < 0 and rear < safe_dist:
+            log.info("safety: 后方 %.2fm < %.2fm，禁止后退", rear, safe_dist)
+            v = 0.0
+        return v, w
 
     # ---------------- episode 推进 ----------------
     async def _run_step(self, v: float, w: float):
         """执行一个 control_dt，然后发 obs"""
         self._step_in_progress = True
-        self.current_action = (v, w)
-        self._start_cmd_vel_loop()
+        t0 = time.time()
+        self._publish_cmd(v, w)
+        t1 = time.time()
 
         await asyncio.sleep(self.cfg["control_dt"])
+        t2 = time.time()
 
         self.step_id += 1
         self.episode_t = round(self.step_id * self.cfg["control_dt"], 3)
         obs = self._build_obs()
+        t3 = time.time()
         self._send(obs)
+        t4 = time.time()
 
         if obs["done"]:
             self._log_episode(obs)
             self.state = "WAIT_RESET"
-            self.current_action = (0.0, 0.0)
-            self._stop_cmd_vel_loop()
+            # 连发几次零速刹车，抵消真实小车惯性
+            for _ in range(3):
+                self._publish_cmd(0.0, 0.0)
+                await asyncio.sleep(0.02)
 
+        log.info("step timing: publish=%.3f sleep=%.3f build_obs=%.3f send=%.3f total=%.3f",
+                 t1 - t0, t2 - t1, t3 - t2, t4 - t3, t4 - t0)
         self._step_in_progress = False
 
     def _log_episode(self, obs: dict):
@@ -411,7 +465,14 @@ class RealRobotServer(Node):
             "config": self.cfg,
         })
 
-    def _handle_reset(self, msg: dict):
+    async def _wait_for_odom(self, timeout: float = 1.5):
+        """等待收到 /odom，最多 timeout 秒。"""
+        deadline = time.time() + timeout
+        while self._get_current_pose() is None and time.time() < deadline:
+            await asyncio.sleep(0.05)
+        return self._get_current_pose() is not None
+
+    async def _handle_reset(self, msg: dict):
         if self.state not in ("WAIT_RESET", "FINISHED"):
             self._error("WRONG_STATE",
                         f"reset 只能在 WAIT_RESET/FINISHED 状态发，当前 {self.state}")
@@ -432,6 +493,11 @@ class RealRobotServer(Node):
 
         seed = msg.get("seed", -1)
         self._last_seed = seed
+
+        # 等待 /odom 就绪，避免用户秒回 human_confirm 时 current 为 None
+        if not await self._wait_for_odom(timeout=1.5):
+            self._error("INTERNAL", "等待 1.5s 仍未收到 /odom")
+            return
 
         if self.goal_mode == "manual-drive":
             # manual-drive：先摆目标点，再推车/开车到起点（odom 记录位移）
@@ -460,13 +526,21 @@ class RealRobotServer(Node):
         self.episode_id += 1
         self.step_id = 0
         self.episode_t = 0.0
-        self.current_action = (0.0, 0.0)
+        self._collision_streak = 0
         self.state = "RUNNING"
         log.info("episode %d 开始: start=(%.3f,%.3f) goal=(%.3f,%.3f)",
                  self.episode_id, self.start_abs.x, self.start_abs.y,
                  self.goal_abs.x, self.goal_abs.y)
         obs = self._build_obs()
         self._send(obs)
+        # 初始 obs 也可能 done（如起点紧贴障碍）：与 _run_step 一致的收尾，
+        # 否则 state 停在 RUNNING，client 发 reset 会报 WRONG_STATE
+        if obs["done"]:
+            self._log_episode(obs)
+            self.state = "WAIT_RESET"
+            for _ in range(3):
+                self._publish_cmd(0.0, 0.0)
+                time.sleep(0.02)
 
     def _handle_human_confirm(self, msg: dict):
         action = msg.get("action")
@@ -512,12 +586,6 @@ class RealRobotServer(Node):
             dist = math.hypot(dx, dy)
             log.info("记录起点: x=%.3f y=%.3f yaw=%.3f (距目标 %.3fm)",
                      current.x, current.y, current.yaw, dist)
-            if dist < 0.3:
-                self._send({
-                    "type": "human",
-                    "action": "drive_to_start",
-                    "detail": f"警告：起点距目标只有 {dist:.2f}m，请继续把车开远一些，到位后再发送 human_confirm('drive_to_start')",
-                })
             self._start_episode()
 
         elif action == "record_start":
@@ -533,10 +601,17 @@ class RealRobotServer(Node):
                      current.x, current.y, current.yaw)
 
             if self.goal_mode == "relative":
-                # 相对目标点：goal = start + goal_relative
+                # 相对目标点：goal = start + R(yaw) * goal_relative
+                # goal_relative 是车体坐标（x 前，y 左），要旋转到世界坐标
+                cos_yaw = math.cos(self.start_abs.yaw)
+                sin_yaw = math.sin(self.start_abs.yaw)
                 self.goal_abs = Pose2D(
-                    self.start_abs.x + self.goal_relative.x,
-                    self.start_abs.y + self.goal_relative.y,
+                    self.start_abs.x
+                    + self.goal_relative.x * cos_yaw
+                    - self.goal_relative.y * sin_yaw,
+                    self.start_abs.y
+                    + self.goal_relative.x * sin_yaw
+                    + self.goal_relative.y * cos_yaw,
                     self.start_abs.yaw,
                 )
 
@@ -553,8 +628,9 @@ class RealRobotServer(Node):
             return
         v = float(msg.get("v", 0.0))
         w = float(msg.get("w", 0.0))
-        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        v = max(self.min_linear_vel, min(self.cfg["v_max"], v))
         w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
+        v, w = self._safety_clamp(v, w)
         log.info("teleop: v=%.3f w=%.3f", v, w)
         twist = Twist()
         twist.linear.x = float(v)
@@ -582,7 +658,7 @@ class RealRobotServer(Node):
 
         v = float(msg.get("v", 0.0))
         w = float(msg.get("w", 0.0))
-        v = max(-self.cfg["v_max"], min(self.cfg["v_max"], v))
+        v = max(self.min_linear_vel, min(self.cfg["v_max"], v))
         w = max(-self.cfg["w_max"], min(self.cfg["w_max"], w))
 
         self._step_task = asyncio.create_task(self._run_step(v, w))
@@ -590,8 +666,7 @@ class RealRobotServer(Node):
     def _handle_all_finish(self, msg: dict):
         log.info("all_finish 收到，准备退出: %s", msg)
         self.state = "FINISHED"
-        self.current_action = (0.0, 0.0)
-        self._stop_cmd_vel_loop()
+        self._publish_cmd(0.0, 0.0)
         self._send({"type": "bye", "reason": "all_finish received"})
         self._stop_event.set()
 
@@ -604,7 +679,7 @@ class RealRobotServer(Node):
 
         mtype = msg.get("type")
         if mtype == "reset":
-            self._handle_reset(msg)
+            await self._handle_reset(msg)
         elif mtype == "action":
             self._handle_action(msg)
         elif mtype == "teleop":
@@ -629,14 +704,16 @@ class RealRobotServer(Node):
         self._handle_hello()
 
         try:
-            async for raw in websocket:
+            while True:
+                raw = await websocket.recv()
                 await self._handle_message(raw)
+                # 让出控制权，确保 _run_step 等 task 能被调度
+                await asyncio.sleep(0)
         except websockets.exceptions.ConnectionClosed:
             log.info("client 断开")
         finally:
             self.websocket = None
-            self.current_action = (0.0, 0.0)
-            self._stop_cmd_vel_loop()
+            self._publish_cmd(0.0, 0.0)
             self.state = "WAIT_RESET"
 
     async def run_server(self):
@@ -654,6 +731,15 @@ def main():
     parser.add_argument(
         "--lidar-front-offset-deg", type=float, default=0.0,
         help="雷达 0° 相对于车头正前的偏移（度）。正数表示车头正前在雷达原始 0° 的左侧"
+    )
+    parser.add_argument(
+        "--lidar-occluded-deg", type=str, default="115,215",
+        help="车身遮挡扇区（雷达原始角度范围，度，逗号分隔）：该角度的读数被车身遮挡，"
+             "屏蔽为 max_range。本车实测 120°~210° 为车壳，默认 115,215"
+    )
+    parser.add_argument(
+        "--min-linear-vel", type=float, default=0.0,
+        help="v 下界（m/s）。遮挡扇区屏蔽后倒车是雷达盲区，默认 0.0 禁止倒车"
     )
     parser.add_argument("--log-dir", type=Path, default=Path("~/a2_real_robot_logs"))
     parser.add_argument(
@@ -675,7 +761,7 @@ def main():
     rclpy.init()
     node = RealRobotServer(args)
 
-    executor = MultiThreadedExecutor()
+    executor = SingleThreadedExecutor()
     executor.add_node(node)
     ros_thread = threading.Thread(target=executor.spin, daemon=True)
     ros_thread.start()
@@ -685,7 +771,7 @@ def main():
     except KeyboardInterrupt:
         log.info("收到 Ctrl+C，退出")
     finally:
-        node._stop_cmd_vel_loop()
+        node._publish_cmd(0.0, 0.0)
         executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()

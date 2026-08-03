@@ -26,6 +26,15 @@ from pathlib import Path
 
 import numpy as np
 
+try:  # 内嵌键盘遥控（真机 drive_to_start 阶段用）；Windows 无 termios 则回退普通输入
+    import termios
+    import tty
+
+    _TELEOP_AVAILABLE = sys.stdin.isatty()
+except ImportError:  # pragma: no cover — Windows
+    termios = tty = None
+    _TELEOP_AVAILABLE = False
+
 try:  # websockets >= 14
     from websockets.asyncio.client import connect
 except ImportError:  # websockets < 14
@@ -35,9 +44,9 @@ from buffer import ReplayBuffer
 from config import (ACT_DIM, CONVERGE_CONSECUTIVE, CONVERGE_RATE,
                     CUR_SHORT_EPISODES, CUR_SHORT_TIME, EVAL_EPISODES,
                     EVAL_INTERVAL, EVAL_SEED_BASE, MAX_EPISODES, OBS_DIM,
-                    PING_INTERVAL, PING_TIMEOUT, WS_URI)
+                    PING_INTERVAL, PING_TIMEOUT, SAVE_INTERVAL, WS_URI)
 from models import get_model_module, model_source
-from obs_pack import pack_obs, scale_action
+from obs_pack import ObsPacker, scale_action
 from reward import compute_reward, done_mask, outcome_of
 from sac import SACAgent
 
@@ -47,6 +56,11 @@ BUFFER_CAPACITY = 500_000     # api.md §6.3：replay buffer 容量（08-02 起 
                               # 与 train_async.py 一致；容纳 14.3 万演示 + 在线数据）
 WARMUP = 5_000                # api.md §6.3：buffer 少于 5000 条不更新
 BYE_TIMEOUT_S = 5.0           # api.md §2.5：等 bye 超时（秒）
+
+# 内嵌遥控（真机 drive_to_start）：v/w 上限取 server v_max/w_max 内保守值
+TELEOP_LINEAR = 0.2           # m/s
+TELEOP_ANGULAR = 0.5          # rad/s
+TELEOP_HZ = 20.0              # 遥控指令发送频率
 
 
 class ProtocolError(RuntimeError):
@@ -73,6 +87,77 @@ def human_confirm_payload(action: str) -> dict:
     return {"type": "human_confirm", "action": action}
 
 
+def read_key() -> str:
+    """读取单个按键（不回车）；仅类 Unix 终端可用。"""
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        return sys.stdin.read(1)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+async def teleop_drive_to_start(ws, action: str, detail: str) -> None:
+    """
+    真机 drive_to_start 阶段：在训练终端直接键盘遥控（W/S/A/D/空格/Q），
+    通过 server 的 teleop 消息驱动 /cmd_vel，免去第二个终端。
+    遥控结束（Q）后发送 human_confirm。
+    """
+    print(f"\n>>> [需要人工操作] {detail}", flush=True)
+    print("内嵌遥控：按住 W/S 前进后退，A/D 左右转，空格停止，Q 结束遥控")
+    print("命令会以 20Hz 持续发给 server，server 再转发给 /cmd_vel\n", flush=True)
+
+    teleop_state = {"v": 0.0, "w": 0.0, "running": True}
+    last_key = ""
+
+    async def sender_loop():
+        while teleop_state["running"]:
+            await ws.send(json.dumps({
+                "type": "teleop",
+                "v": teleop_state["v"],
+                "w": teleop_state["w"],
+            }))
+            print(f"\r  teleop: v={teleop_state['v']:+.2f}  w={teleop_state['w']:+.2f}"
+                  f"  |  last_key={last_key!r}  |  W/S/A/D/space/Q",
+                  end="", flush=True)
+            await asyncio.sleep(1.0 / TELEOP_HZ)
+        await ws.send(json.dumps({"type": "teleop", "v": 0.0, "w": 0.0}))
+
+    def key_reader():
+        nonlocal last_key
+        while teleop_state["running"]:
+            key = read_key()
+            last_key = key
+            if key == "w" or key == "W" or key == "\x1b[A":      # 前进
+                teleop_state["v"] = TELEOP_LINEAR
+                teleop_state["w"] = 0.0
+            elif key == "s" or key == "S" or key == "\x1b[B":    # 后退
+                teleop_state["v"] = -TELEOP_LINEAR
+                teleop_state["w"] = 0.0
+            elif key == "a" or key == "A" or key == "\x1b[D":    # 左转
+                teleop_state["v"] = 0.0
+                teleop_state["w"] = TELEOP_ANGULAR
+            elif key == "d" or key == "D" or key == "\x1b[C":    # 右转
+                teleop_state["v"] = 0.0
+                teleop_state["w"] = -TELEOP_ANGULAR
+            elif key == " ":
+                teleop_state["v"] = 0.0
+                teleop_state["w"] = 0.0
+            elif key == "q" or key == "Q":
+                teleop_state["v"] = 0.0
+                teleop_state["w"] = 0.0
+                teleop_state["running"] = False
+                return
+
+    sender = asyncio.create_task(sender_loop())
+    reader = asyncio.get_event_loop().run_in_executor(None, key_reader)
+    await asyncio.gather(sender, reader)
+
+    print("\n\n遥控结束，发送 human_confirm(drive_to_start)...")
+    await ws.send(json.dumps(human_confirm_payload(action)))
+
+
 async def recv_msg_handle_human(ws, auto_confirm: bool = False) -> dict:
     """
     收一条消息；若是真机 server 的 human 消息，则提示线下操作并回复确认，
@@ -87,12 +172,16 @@ async def recv_msg_handle_human(ws, auto_confirm: bool = False) -> dict:
         log.warning("[HUMAN ACTION REQUIRED] %s: %s", action, detail)
         if auto_confirm:
             log.warning("自动发送 human_confirm(%s)", action)
+        elif action == "drive_to_start" and _TELEOP_AVAILABLE:
+            # 真机：在训练终端直接键盘遥控，免开第二个终端
+            await teleop_drive_to_start(ws, action, detail)
+            continue
         else:
-            # 交互式提示：阻塞等线下人员按回车
+            # 交互式提示：等线下人员按回车；用 executor 避免阻塞 asyncio 事件循环
             try:
-                print(f"\n>>> [需要人工操作] {detail}\n完成后按回车继续...",
-                      flush=True)
-                input()
+                prompt = f"\n>>> [需要人工操作] {detail}\n完成后按回车继续..."
+                print(prompt, flush=True)
+                await asyncio.get_event_loop().run_in_executor(None, input, "")
             except EOFError:
                 log.warning("非交互终端，自动发送 human_confirm(%s)", action)
         await ws.send(json.dumps(human_confirm_payload(action)))
@@ -191,11 +280,12 @@ async def run_episode(ws, cfg, agent, buffer, args, *, seed: int,
     if obs.get("type") != "obs":
         raise ProtocolError(f"reset 后未收到 obs: {obs}")
 
+    packer = ObsPacker(cfg)   # 帧堆叠打包器（每局新建，首帧历史=当前帧）
     steps = 0
     ret = 0.0
     prev_a01 = None
     while not obs["done"]:
-        vec = pack_obs(obs, cfg)
+        vec = packer.pack(obs)
         a01 = agent.select_action(vec, deterministic=deterministic)
         if prev_a01 is None:
             prev_a01 = a01.copy()  # 第一步无历史动作 → 平滑惩罚为 0（§6.4）
@@ -208,7 +298,7 @@ async def run_episode(ws, cfg, agent, buffer, args, *, seed: int,
 
         r = compute_reward(obs, a01, prev_a01, obs_next)
         if train:
-            buffer.push(vec, a01, r, pack_obs(obs_next, cfg),
+            buffer.push(vec, a01, r, packer.pack(obs_next),
                         done_mask(obs_next))
         ret += r
         steps += 1
@@ -342,7 +432,7 @@ async def amain(args) -> int:
                                                     r["outcome"], r["success"])
 
                     # ---- 局后更新：K = 本 episode 步数（§3.3，约 1:1 更新比）----
-                    if len(buffer) >= WARMUP:
+                    if len(buffer) >= args.warmup:
                         loss_acc = {}
                         for _ in range(steps):
                             loss = agent.update(buffer)
@@ -362,10 +452,18 @@ async def amain(args) -> int:
                                 len(buffer))
                     else:
                         log.info("ep %4d | %-12s | steps=%3d | return=%8.2f | "
-                                 "buffer=%d（warmup 中）",
-                                 episode, outcome, steps, ret, len(buffer))
+                                 "buffer=%d（warmup 中，需 ≥%d）",
+                                 episode, outcome, steps, ret, len(buffer),
+                                 args.warmup)
 
                     elog.log_episode(episode, steps, ret, outcome, success)
+
+                    # ---- 定期存盘：每 save_interval 局存一次 ckpt_ep_N.pt ----
+                    # （新名字、不覆盖；与评估解耦，Ctrl+C 最多丢 save_interval 局）
+                    if (episode + 1) % args.save_interval == 0:
+                        await save_ckpt(model_mod, args.save_dir,
+                                        f"ep_{episode + 1}", models, agent,
+                                        episode, hello["protocol_version"])
 
                     # ---- 周期性评估 + 存盘（§6.7）----
                     if (episode + 1) % args.eval_interval == 0:
@@ -375,9 +473,10 @@ async def amain(args) -> int:
                         log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) ==",
                                  episode, 100 * rate, succ, args.eval_episodes)
 
-                        await save_ckpt(model_mod, args.save_dir,
-                                        f"ep_{episode + 1}", models, agent,
-                                        episode, hello["protocol_version"])
+                        if (episode + 1) % args.save_interval != 0:
+                            await save_ckpt(model_mod, args.save_dir,
+                                            f"ep_{episode + 1}", models, agent,
+                                            episode, hello["protocol_version"])
                         if rate > best_rate + 1e-9:
                             best_rate = rate
                             await save_ckpt(model_mod, args.save_dir, "best",
@@ -388,7 +487,10 @@ async def amain(args) -> int:
                                            if rate >= args.converge_rate else 0)
 
                         # ---- 收敛（§6.8）：连续 3 次评估成功率 ≥90% ----
-                        if converge_streak >= args.converge_consecutive:
+                        # 注意：课程学习阶段（服务端 reset 计数）完成前不收敛，
+                        # 否则会过早停止（只学了简单场景），--converge-min-episode 设门槛
+                        if (converge_streak >= args.converge_consecutive
+                                and episode >= args.converge_min_episode):
                             log.info("收敛：连续 %d 次评估 ≥%.0f%%",
                                      args.converge_consecutive,
                                      100 * args.converge_rate)
@@ -468,12 +570,20 @@ def parse_args(argv=None):
     ap.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
     ap.add_argument("--eval-episodes", type=int, default=EVAL_EPISODES)
     ap.add_argument("--eval-seed-base", type=int, default=EVAL_SEED_BASE)
+    ap.add_argument("--save-interval", type=int, default=SAVE_INTERVAL,
+                    help="每隔多少局存一次 ckpt_ep_N.pt（每次新名字、不覆盖；"
+                         "真机微调建议 10）")
     ap.add_argument("--converge-consecutive", type=int,
                     default=CONVERGE_CONSECUTIVE)
     ap.add_argument("--converge-rate", type=float, default=CONVERGE_RATE)
+    ap.add_argument("--converge-min-episode", type=int, default=0,
+                    help="课程学习完成前禁止收敛（仿真课程 3 阶段约 900 局，"
+                         "传 900 保证学完全部难度再判定收敛）")
     # 真机模式（api.md §2.8 / §2.9）：自动回复 human_confirm，不暂停等人工
     ap.add_argument("--auto-human", action="store_true",
                     help="真机模式下自动发送 human_confirm，不暂停等线下操作（调试用）")
+    ap.add_argument("--warmup", type=int, default=WARMUP,
+                    help="buffer 少于该条数不做梯度更新（真机微调建议调小，如 256）")
     return ap.parse_args(argv)
 
 

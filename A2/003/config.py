@@ -22,7 +22,7 @@ W_MAX = 1.5
 GOAL_TOLERANCE = 0.15
 ROBOT_RADIUS = 0.18
 ARENA_SIZE = 4.0
-OBS_DIM = 68
+OBS_DIM = 68              # 2026-08-02 晚回退：弃用 132 帧堆叠，回到 v2 的 68 维单帧
 ACT_DIM = 2
 
 # 观测归一化常数（api.md §4）
@@ -42,7 +42,9 @@ TARGET_ENTROPY = -float(ACT_DIM)  # α 自动调节目标熵 = -ACT_DIM = -2
 W_APPROACH = 5.0                # × (dist_{t-1} − dist_t)，朝目标靠近
 R_GOAL_REACHED = 200.0          # 到达目标
 R_COLLISION = -200.0            # 碰撞
-R_TIME_STEP = -0.1              # 每步时间惩罚
+R_TIME_STEP = -0.5              # 每步时间惩罚（08-02 晚 -0.1→-0.5：帧堆叠+轻惩罚导致
+                                # "不动吸引子"——不动 60s 只亏 60 分远低于碰撞 -200；
+                                # 加重到 300 分逼策略必须行动）
 W_SMOOTH = 0.5                  # × (a − a_prev)²，动作平滑惩罚（v、w 各一份）
 # 密集障碍接近惩罚（run2 新增；run3 起 W_DANGER 3.0→8.0）：min(lidar) 进入 D_SAFE 内
 # 开始按深度线性惩罚，给"离碰撞还有多远"一个连续梯度。
@@ -56,6 +58,7 @@ MAX_EPISODES = 2_000            # 训练 episode 上限（收敛会提前 break�
 EVAL_INTERVAL = 50              # 每 N 个训练 episode 评估一次
 EVAL_EPISODES = 10              # 每次评估局数
 EVAL_SEED_BASE = 10_000         # 评估固定种子 = EVAL_SEED_BASE + i（i = 0..EVAL_EPISODES-1）
+SAVE_INTERVAL = 10              # 每 N 个训练 episode 存一次 ckpt_ep_N.pt（新名字不覆盖；与评估解耦）
 CONVERGE_CONSECUTIVE = 3        # 连续多少次评估达到收敛线
 CONVERGE_RATE = 0.9             # 成功率收敛线（≥90%）
 CKPT_INTERVAL = 50              # 每 N 个训练 episode 存一次 checkpoint
@@ -68,5 +71,7 @@ CUR_SHORT_TIME = 30.0
 
 # ================= 连接 =================
 WS_URI = "ws://127.0.0.1:8765"
-PING_INTERVAL = 20              # 应用层不做心跳（§0），仅保持库级 ping 参数
-PING_TIMEOUT = 60
+# 应用层不做心跳（§0）；真机人工摆车阶段会阻塞数十秒，
+# 库级 ping 若超时会把连接掐掉，所以直接关闭。
+PING_INTERVAL = None
+PING_TIMEOUT = None

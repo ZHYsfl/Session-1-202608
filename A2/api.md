@@ -18,7 +18,7 @@
 | 方位角 bearing 约定 | 车身坐标系，车头方向为 0，左正右负，取值 (-π, π] | |
 | 动作范围 | v ∈ [-0.5, 0.5] m/s，w ∈ [-1.5, 1.5] rad/s | 发送方可发任意值，server 端 clip |
 | 归一化职责 | **001 发原始物理量；003 负责归一化打包；009 的网络只见归一化向量** | 见 §4 |
-| 连接保活 | 使用 WebSocket 库自带 ping/pong | 应用层不实现心跳 |
+| 连接保活 | 使用 WebSocket 库自带 ping/pong | 应用层不实现心跳；**真机模式下人工摆车可能阻塞数十秒，应关闭库级 ping/pong 或设置足够长的超时**，避免等待期间被误掐 |
 | 断线策略 | v1 不支持断线重连：连接断开双方直接退出，重新启动 | |
 | episode 终止原因 | 三种：`collision` / `goal_reached` / `timeout`，互斥 | 见 §5.4 |
 
@@ -30,12 +30,13 @@
 | `lidar_max_range` | 3.5 m | 雷达最大量程。距离超过它或没有回波（打到无穷远）时，server 一律按 3.5 发送——JSON 传不了 inf。3.5 m 约为 4 m 场地对角线（5.66 m）的六成，保证车在场内任何位置都能至少看到最近的几面墙/障碍物。 |
 | `control_dt` | 0.1 s | 决策周期：server 每收到一个 action，就把仿真推进 0.1 s（内部 10 个物理步 × 10 ms）。等价于网络以 10 Hz 的频率做决策。太大则动作粗糙、撞上了才发现；太小则每步位移太小、奖励信号弱，且 episode 步数变多、训练变慢。 |
 | `max_episode_time` | 60.0 s | 单个 episode 的仿真时间上限，60 s ÷ 0.1 s = 600 步封顶，到时置 `timeout`。按 v_max=0.5 m/s 理论可走 30 m，约场地对角线的 5 倍——绕障往返、走错再回头都够用（v1.2 从 30 s 放宽：实测绕障路线常需 15~25 s，30 s 对绕远路线太紧）。设上限是为了防止策略"原地摆烂不动"也能无限混下去。 |
-| `v_max` | 0.5 m/s | 线速度指令上限，动作 clip 范围 [-0.5, +0.5]（允许倒车）。同时是观测归一化除数（§4）。真机阶段的安全速度也以此为上界，真机实测时应从更低值开始。 |
+| `v_max` | 0.5 m/s | 线速度指令上限。同时是观测归一化除数（§4）。真机阶段的安全速度也以此为上界，真机实测时应从更低值开始。 |
+| `min_linear_vel` | 0.0 m/s | 线速度指令下限：**禁止倒车**（clip 到 [0, +0.5]）。真机车壳遮挡雷达后向扇区（约 177°~277°），后方是盲区，倒车等于闭眼后退，仿真与真机对齐禁止。 |
 | `w_max` | 1.5 rad/s | 角速度指令上限，约 86°/s，clip 范围 [-1.5, +1.5]。过大容易甩尾、仿真里一步转太狠导致观测跳变；过小则绕障转弯太慢、600 步内来不及到点。 |
 | `goal_tolerance` | 0.15 m | 到达判定半径：目标点视为半径 0.15 m 的圆盘，车中心进入（`dist ≤ 0.15`）即置 `goal_reached`。车不可能精确压到一个数学点上，必须给容差；太大容易"没到也算到"蒙混过关，太小车会在目标边缘打转永远判定不了成功。 |
 | `robot_radius` | 0.18 m | 车身轮廓的外接圆半径近似值。碰撞判定简化为**中位数滤波后** `min(lidar) < 0.18` 即 `collision`（滤波见 §5.3 注），免去车身多边形与障碍物的几何相交计算。取值 = 实际车身外接圆半径再略放大，留安全余量；Webots 车身尺寸改了此值要重算。 |
 | `arena_size` | 4.0 m | 正方形场地边长（以世界文件为准）。它决定一系列其他参数的合理性：lidar_max_range（≈对角线六成）、目标点采样范围、§4 中 dist 归一化常数 10.0（≈对角线 2 倍，保证归一化后基本不超 1）。场地改大这三个都要重估。 |
-| `OBS_DIM` | 68 | **单帧观测维度** = 64（lidar）+ 2（goal: dist、bearing）+ 2（vel: v、w）。这是环境每帧返回的维度，hello 下发的 `obs_dim` 就是它，**协议锁定**；任何一项观测增减都要改它并升协议版本。注意它**不等于网络输入维度**：算法侧若做帧堆叠（如拼最近 3 帧），网络输入为 68×3=204；循环网络则每步仍喂 68。网络输入形状是 003/009 的内部设计，协议不感知（详见 §4、§7.1）。 |
+| `OBS_DIM` | 132 | **观测维度** = 128（lidar 2 帧堆叠，64×2）+ 2（goal: dist、bearing）+ 2（vel: v、w）。hello 下发的 `obs_dim` 就是它，**协议锁定**；任何一项观测增减都要改它并升协议版本。2026-08-02 从 68（单帧）升级为 132：2 帧堆叠给网络"障碍在逼近还是远离"的趋势感。帧堆叠在 003 侧打包（server 照发单帧，003 维护上一帧，episode 首帧历史=当前帧），堆叠帧数是 003/009 的内部设计，协议消息内容不感知（详见 §4、§7.1）。 |
 | `ACT_DIM` | 2 | 网络输出动作维度：(v, w) 两个数。若未来利用麦克纳姆轮加横向速度 vy，变为 3，属于不兼容改动，升协议主版本。 |
 
 ---
@@ -70,6 +71,7 @@
 | `bye` | server → client | 收到 all_finish 后回应，随后关连接 |
 | `human` | server → client | 真机模式下需要线下人工操作时发送 |
 | `human_confirm` | client → server | 线下人工操作完成后回复 server |
+| `teleop` | client → server | 真机 `drive_to_start` 阶段遥控小车（临时扩展，不升协议版本） |
 | `error` | 双向 | 任何非法消息/状态错误 |
 
 ### 2.1 hello（server → client）
@@ -80,7 +82,7 @@
 {
   "type": "hello",
   "protocol_version": "1.1",
-  "env_name": "webots_diffbot_v1",
+  "env_name": "webots_diffbot_v1"  // 真机为 "real_diffbot_v1"
   "config": {
     "lidar_count": 64,
     "lidar_max_range": 3.5,
@@ -208,7 +210,7 @@ server 收到后的内部流程：校验字段 → 用 seed 初始化 RNG → `s
 | type | string | — | 固定 "action" |
 | episode_id | int | — | 必须等于所回应 obs 的 episode_id |
 | step_id | int | — | 必须等于所回应 obs 的 step_id |
-| v | float | m/s | 期望线速度，server clip 到 [-v_max, v_max] |
+| v | float | m/s | 期望线速度，server clip 到 [min_linear_vel, v_max] = [0, 0.5]（禁止倒车） |
 | w | float | rad/s | 期望角速度，server clip 到 [-w_max, w_max] |
 
 ### 2.5 all_finish（client → server）
@@ -301,6 +303,22 @@ client（003 或任何人工操作客户端）收到后应**阻塞等待线下�
 
 真机 reset 的完整时序见 §3.4。
 
+### 2.10 teleop（client → server）【真机扩展】
+
+仅在 `DRIVE_TO_START` 阶段有效，由人工遥控客户端向 server 发送实时速度，server 直接转发到 `/cmd_vel`。属于真机人工介入的临时通道，**不改变 `action` 的语义**，也不影响训练时 003 与 server 之间的 `action`/`obs` 循环。
+
+```json
+{"type": "teleop", "v": 0.2, "w": 0.0}
+```
+
+| 字段 | 类型 | 单位 | 说明 |
+|---|---|---|---|
+| type | string | — | 固定 "teleop" |
+| v | float | m/s | 期望线速度，server 会 clip 到 `[min_linear_vel, v_max]` = [0, 0.5]（禁止倒车） |
+| w | float | rad/s | 期望角速度，server 会 clip 到 `[-w_max, w_max]` |
+
+**注意**：`teleop` 只用于把车开到起点；进入 `RUNNING` 后必须使用 `action` 消息驱动。`teleop` 不会触发 `obs` 返回，也不会推进 episode 时间。
+
 ---
 
 ## 3. 状态机与完整运作流程
@@ -316,7 +334,7 @@ WAIT_RESET ──收到 all_finish──▶ 发 bye ──▶ 关闭
 其余消息 → 回 error 并退出
 ```
 
-**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
+**真机模式补充**：`reset` 后 server 进入 `RECORD_GOAL`，发送 `human(record_goal)`；收到 `human_confirm(record_goal)` 后进入 `DRIVE_TO_START`，发送 `human(drive_to_start)`（用户通过 `teleop` 消息遥控开车到起点）；收到 `human_confirm(drive_to_start)` 后进入 `RUNNING` 并发送初始 `obs`。详见 §3.4。
 
 ### 3.2 完整时序
 
@@ -350,7 +368,7 @@ for episode in range(MAX_EPISODES):
     while not obs.done:
         vec = pack_obs(obs)                        # §4，归一化
         a01, _, _ = actor.sample(vec)              # 009 接口，[-1,1]²
-        send(action(v=a01[0]*v_max, w=a01[1]*w_max))
+        send(action(v=(a01[0]+1)/2*v_max, w=a01[1]*w_max))
         next_obs = recv()
         r = compute_reward(obs, action, next_obs)  # §6.4
         buffer.push(vec, a01, r, pack_obs(next_obs), done_mask(next_obs))  # §6.5
@@ -378,7 +396,7 @@ client(003/人工客户端)              server(真机 001-replacement)
    │      （线下摆车）              │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 goal
    │◀──── human(drive_to_start) ─────│  提示：把车遥控开到起点
-   │      （线下遥控开车，可旋转）  │
+   │      （线下发送 teleop 消息）  │
    │──── human_confirm ───────────▶│  server 记录当前 /odom 为 start
    │◀──────── obs(ep=1, s=0) ──────│  开始这一局
    │──── action(ep=1, s=0) ───────▶│
@@ -395,22 +413,27 @@ client(003/人工客户端)              server(真机 001-replacement)
 
 ## 4. 观测打包与归一化（003 负责，009 只接受此向量）
 
-输入向量 68 维，顺序固定：
+输入向量 132 维（2 帧雷达堆叠 + 4 标量），顺序固定：
 
 | 下标 | 来源字段 | 归一化公式 | 结果范围 |
 |---|---|---|---|
-| [0:64] | lidar[i] | `clip(x, 0, max_range) / max_range` | [0, 1] |
-| [64] | goal.dist | `min(d, 10.0) / 10.0` | [0, 1] |
-| [65] | goal.bearing | `b / π` | (-1, 1] |
-| [66] | vel.v | `clip(v, -v_max, v_max) / v_max` | [-1, 1] |
-| [67] | vel.w | `clip(w, -w_max, w_max) / w_max` | [-1, 1] |
+| [0:64] | lidar[i]（当前帧） | `clip(x, 0, max_range) / max_range` | [0, 1] |
+| [64:128] | lidar[i]（上一帧；episode 首帧=当前帧） | 同上 | [0, 1] |
+| [128] | goal.dist | `min(d, 10.0) / 10.0` | [0, 1] |
+| [129] | goal.bearing | `b / π` | (-1, 1] |
+| [130] | vel.v | `clip(v, -v_max, v_max) / v_max` | [-1, 1]（禁止倒车后实际 ≥0） |
+| [131] | vel.w | `clip(w, -w_max, w_max) / w_max` | [-1, 1] |
 
-**动作映射（003 负责）**：网络输出一个二维动作向量，记作 `(a0, a1) ∈ (-1, 1)²`，然后线性放大到底盘真实速度范围：
+**动作映射（003 负责，2026-08-02 晚 v2 映射）**：网络输出一个二维动作向量，记作 `(a0, a1) ∈ (-1, 1)²`，然后映射到底盘真实速度范围：
 
 ```
-v = a0 * v_max      # a0 ∈ (-1,1) → v ∈ (-0.5, 0.5) m/s
-w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
+v = (a0 + 1) / 2 * v_max      # a0 ∈ (-1,1) → v ∈ (0, 0.5) m/s
+w = a1 * w_max                # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 ```
+
+为什么从旧映射 `v = a0 * v_max` 改成仿射映射：禁止倒车后 server 把 v<0 钳成 0（`min_linear_vel=0`），旧映射里 a0 的整个负半轴都等于"刹车"——一半动作空间无物理效果、无梯度，策略漂进负半区后难以爬出（训练中"小车不动"的诱因之一）。仿射映射后每个动作都对应有效前进速度，停车只发生在 a0→-1 的极端。
+
+**旧专家数据兼容**：旧映射下采集的演示动作在 `--preload` 预填时统一做 `a0' = 2·clip(a0,0,1) − 1` 变换（a0≥0 段严格可逆），见 `obs_pack.expert_action_v1_to_v2`。
 
 记号说明：`(-1, 1)²` 右上角的 2 表示**二维空间**，来自区间与自身的笛卡尔积 `(-1,1) × (-1,1)`，即"两个分量各自都落在 (-1,1) 区间"，几何上是一个二维正方形区域。同理观测向量所在空间可记为 ℝ⁶⁸。
 
@@ -418,12 +441,12 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 
 **分工红线**：缩放置换（乘 v_max / w_max）只在 003 做。009 的网络永远只工作在 (-1,1)² 空间，不知道 v_max、w_max 是多少；001 收到的永远是物理单位的速度指令。任何一侧多做一次缩放，动作就错一倍。
 
-**帧堆叠 / 循环结构（可选，003/009 内部设计，v1.1 起明确与协议解耦）**：本表定义的是**单帧**打包（68 维）。若想给网络动力学记忆（加速滞后、惯性滑行——本环境的 `vel` 反馈里就带着这些信息），003 有两种做法：
+**帧堆叠（现行实现，v1.1 起与协议解耦）**：本表定义的 132 维已是 003 侧 **2 帧堆叠**的产物——server 每帧照发单帧原始物理量（64 雷达 + goal + vel），003 的 `ObsPacker` 维护上一帧雷达拼成 128 维雷达段。若想换一种记忆结构，003 有两种做法：
 
-- **帧堆叠**：把最近 N 帧向量按本表各拼一次、拼接为 68×N 输入（各帧用同一套归一化）。如 N=3 时输入 204 维，PolicyNet/QNet 实例化传 `obs_dim=204` 即可（§7.1 签名不变）。
-- **循环网络**（LSTM/GRU/Transformer）：每步仍喂 68 维，记忆在隐藏状态里，无需改维度。
+- **改堆叠帧数**：如 N=3 时输入 64×3+4=196 维，`obs_dim` 同步改并升协议版本（hello 会下发，client 强校验）。
+- **循环网络**（LSTM/GRU/Transformer）：每步仍喂当前帧，记忆在隐藏状态里。
 
-两种做法都不改变协议消息内容与 hello 的 `obs_dim`。注意第 0 条 obs 之前没有历史：帧堆叠应在 `episode_id` 变化时清空缓冲（首帧可复制填充），循环策略则重置隐藏状态——这是 003 侧两三行的实现细节。
+两种做法都不改变协议消息内容。注意第 0 条 obs 之前没有历史：帧堆叠应在 `episode_id` 变化时清空缓冲（首帧可复制填充），循环策略则重置隐藏状态——这是 003 侧两三行的实现细节。
 
 ---
 
@@ -435,6 +458,16 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 - `Lidar` 节点：`horizontalFieldOfView=6.2832`、`numberOfLayers=1`、`resolution=64`、`maxRange=3.5`，装于车顶中心，记录安装高度。
 - robot 节点 `supervisor TRUE`、`basicTimeStep=10`。
 - 场地：4 m × 4 m 围墙；障碍物 5~8 个（box/cylinder 混合）；目标点放绿色标记柱便于肉眼调试。
+
+### 5.1b pysim：纯 Python 仿真 server（异步 RL 用，2026-08-02 晚引入）
+
+`003/tools/pysim_server.py`：本环境机器人是**理想运动学**（§5.3 无轮直接积分），Webots 里唯一的真实物理只剩 Lidar 射线检测——这部分用解析式射线检测（64 射线 vs 圆障碍 + 围墙）即可复刻。pysim 与 env_server 的关系和差异：
+
+- **完全一致**：协议消息/状态机/error 码、运动学子步积分、reset 采样约束与死局 BFS、雷达中位数滤波 + 遮挡扇区（177°~277°）、碰撞判定（滤波后 min(lidar) < 0.18）、终止优先级。
+- **已知差异（可接受，最终策略在 Webots/真机验收）**：障碍按外接圆（Webots 是 Box，正对盒面读数略小）、雷达无噪声/无运动尖峰、无 z 轴姿态。
+- **用途**：异步 RL（train_async.py）的采集/评估实例。单实例吞吐比 Webots 高一个数量级，12+ 实例 CPU 开销可忽略；多 Webots 实例方案已弃用（2026-08-02 实测多实例全部卡死）。
+- **保真度验收**：同种子 100 局脚本专家，Webots 94% / pysim 96% 成功率。
+- 保活差异：env_server 断线即关仿真；pysim 没有仿真可关，`all_finish`/断线后回到 WAIT_RESET 等下一个客户端，进程由启动脚本统一管理。
 
 ### 5.2 reset 内部流程
 
@@ -467,12 +500,15 @@ w = a1 * w_max      # a1 ∈ (-1,1) → w ∈ (-1.5, 1.5) rad/s
 真机 server 与 Webots 仿真的差异点：
 
 1. **传感器来源**：`lidar[64]` 由 `/scan`（Delta-2G，288 点/圈，约 6.7 Hz）重采样而来；`vel{v,w}` 取自 `/odom.twist`；`goal` 由 `record_goal` 时记录的 `/odom` 位姿与 `drive_to_start` 时记录的 `/odom` 位姿相减得到。
-2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。
+2. **雷达车头方向标定**：`/scan` 的 0° 不一定与车头正前对齐，需运行 `calibrate_lidar_front.py` 得到 `lidar_front_offset_deg`，启动 server 时传入。当前标定值已记录在 `A2/real_robot/README.md`。
 3. **重采样与中位数滤波**：288 点按角度最近邻重采样为 64 线；对 64 线结果做 3 邻域环形中位数滤波；`inf`/无效值替换为 `lidar_max_range`。
 4. **动作执行**：收到 `(v,w)` 后 clip 到 `±v_max/±w_max`，以 50 Hz 向 `/cmd_vel` 发布 Twist，持续 `control_dt=0.1 s`，然后读取最新传感器数据并回 `obs`。
 5. **坐标系约定**：`drive_to_start` 时把车所在位置视为该 episode 的局部坐标原点；目标点坐标为 `record_goal` 时的 `/odom` 位姿。因此 episode 内 `goal.dist` / `goal.bearing` 均相对于起点计算，依赖 `/odom` 的短时精度。
-6. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
-7. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免串口冲突。见 `run_a2_real_robot.sh`。
+6. **目标点设定模式**：真机 server 启动参数 `--goal-mode` 控制。
+   - `manual-drive`（默认，训练用）：`reset` 后先人工摆目标点 → `record_goal` → 遥控开车到起点 → `drive_to_start` → 开始 episode。
+   - `relative`（测试用）：`reset` 后只需摆起点，`goal` 由 `start + (goal_relative_x, goal_relative_y)` 计算。
+7. **遥控开车要求**：`record_goal` 与 `drive_to_start` 之间必须靠车轮移动（推车或开车），不能手搬。`/odom` 只跟踪车轮编码器，不跟踪人手搬车；手搬会导致 goal 与 start 的 odom 坐标重合，episode 在 step 0 即 `goal_reached`。
+8. **启动依赖**：必须先启动底盘节点（`car_base_node`，串口 `/dev/ttyAMA0` @115200）和 Delta-2G 节点（`/dev/ttyUSB0` @115200），并停止卖家 `APP` 服务以避免 `/cmd_vel` 被覆盖。见 `run_a2_real_robot.sh`。
 
 ---
 

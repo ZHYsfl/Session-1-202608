@@ -15,6 +15,25 @@ from config import DIST_NORM  # api.md §4: min(d, 10.0) / 10.0，= 场地对角
 
 ONE_OVER_PI = 1.0 / math.pi
 
+OBS_DIM = 68   # 单帧打包维度（2026-08-02 晚回退：弃用 132 帧堆叠，回到 v2 的 68 维）
+
+
+class ObsPacker:
+    """单帧打包器（无帧堆叠）。
+
+    train.py 的帧堆叠时代接口保留（reset()/pack()），内部不做历史：
+    pack() 等价于 pack_obs()。回到 132 帧堆叠时恢复 git 中对应版本即可。
+    """
+
+    def __init__(self, cfg: dict):
+        self.cfg = cfg
+
+    def reset(self) -> None:
+        pass
+
+    def pack(self, obs: dict) -> np.ndarray:
+        return pack_obs(obs, self.cfg)
+
 
 def pack_obs(obs: dict, cfg: dict) -> np.ndarray:
     """

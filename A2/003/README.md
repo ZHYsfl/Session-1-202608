@@ -82,12 +82,72 @@ python train.py --episodes 2000
 课程学习默认开启（前 300 局 15 s 时限，之后放回 30 s，见 §2.2 config_override）；
 `--no-curriculum` 关闭。训练中途 Ctrl+C 会先发 `all_finish(interrupted)` 再退出（§2.5）。
 
+### 3b. 异步 RL（08-03 起以 Webots 异步为准）
+
+**Webots 异步（当前唯一训练路径，run15-17 验证）**：
+`run_webots_async.sh` 起 4 个 fast 采集实例（8765-8768）+ 1 个专职评估
+实例（8873），训练分布 = 验收分布，~55 局/分：
+
+```bash
+bash /home/zane/session_1/A2/real_robot/run_webots_async.sh        # 4 workers / 1500 局 / 从 0 + expert_v4_68 预填
+bash /home/zane/session_1/A2/real_robot/run_webots_async.sh 4 1600 checkpoints/ckpt_sim_v8_best.pt run_webots_v8b "--converge-consecutive 999"   # 续训
+```
+
+注意：**webots 实例数不要超 5**（8 实例实测全部卡死，4-5 是稳定配置）。
+
+纯 Python 仿真 `tools/pysim_server.py` 已弃用于训练（run14/v6 实锤
+sim-sim 差距：pysim 100% 收敛但 Webots 验收仅 60%），仅留作冒烟测试。
+
+要点：
+- `train_async.py`：worker 并行采集共享 replay buffer，learner 独立线程
+  1:1 UTD；learner 落后 >5000 条时 worker 背压暂停（不丢更新）。
+- 评估走**独立实例**（默认 `ws://127.0.0.1:8873`）与采集并行，不再暂停 worker；
+  **流动种子**（每轮 seed_base+=13）防背下固定评估集；warmup 后才开始评估
+  （修复 run15 的 best 选择 bug）。
+- 从 0 训练默认预填 `data/expert_v4_68.npz`（600 局 94% 成功、7.1 万条）。
+- checkpoint/日志在 `checkpoints/<TAG>` / `logs/<TAG>`。
+
+**2026-08-02 晚架构/映射修复（v5，已废弃仅存档）**：
+- `LidarEncoder` 全局平均池化 `AdaptiveAvgPool1d(1)` 会抹掉障碍方向信息
+  （v4 比 v2 差的根因），改为池化到 8 个方向 bin（45°/bin）后 flatten，
+  雷达特征 32→256 维。
+- 动作映射改仿射 `v=(a0+1)/2·v_max`：消除禁止倒车下 a0<0 全是"刹车"的死区。
+- "小车不动"的奖励侧解释：不动 60 s 折扣后约 −50 ≫ 碰撞 −200，是理性局部
+  最优；只有 critic 看得见到 +200 目标的路径才会动——方向信息修复是关键。
+
+### 4. 真机物理小车微调（sim-to-real，08-02 起）
+
+以 Webots 异步 RL 收敛权重（`checkpoints/ckpt_sim_v8b_best.pt`，68 维 MLP，
+碰撞半径 0.18，ep 1599 / update_step 77039；30 个全新种子 28/30、
+老硬种子 30000-30014 15/15）为起点，在真机（`A2/real_robot` server，
+manual-drive 模式）上继续训练：
+
+```bash
+cd /home/zane/session_1/A2/003 && uv run python train.py --uri ws://192.168.43.114:8765 --resume checkpoints/ckpt_sim_v8b_best.pt --warmup 256
+```
+
+> 08-02 晚注：v5（132 维 CNN + 仿射映射，纯 pysim 训练 100% 收敛）真机效果差，
+> 已整套回退到 v2 的 68 维栈（model.py / obs_pack.py / config.py / 真机 server
+> obs_dim=68）。v5 教训：纯 pysim（无噪声、解析雷达、理想响应）训出的策略
+> 不过 Webots/真机——仿真收敛后必须先在 Webots 验收再上真机。
+
+要点：
+- 每局都是人工摆车（`record_goal` 摆目标点 → `drive_to_start` 遥控开到起点），
+  不要用 `--auto-human`（会跳过等待）。
+- `drive_to_start` 阶段已内嵌键盘遥控（08-02）：收到提示后直接在训练终端按
+  W/S 前进后退、A/D 左右转、空格停止、Q 结束遥控，无需第二个终端
+  （通过 server 的 teleop 消息驱动，不依赖 Pi 上的 ROS 环境）。
+- `--warmup 256`：真机微调用仿真权重起步，critic 已训好，256 条经验即可开更，
+  避免默认 5000 步空转（真机每步都要人工 reset，成本高）。
+- 真机与仿真差异（雷达噪声、速度响应约 1.10x、转向动力学）由在线微调吸收，
+  初期 SAC 探索噪声大，注意安全，随时 Ctrl+C。
+
 ## 各模块 ↔ api.md 映射
 
 | api.md 章节 | 实现 | 说明 |
 |---|---|---|
 | §0 全局常量/默认值 | `config.py` | hello 下发的 config 才是权威，代码以 hello.config 为准 |
-| §2.1 hello 校验 | `train.py: validate_hello` | 主版本一致 + obs_dim == 68，不符发 error 退出 |
+| §2.1 hello 校验 | `train.py: validate_hello` | 主版本一致 + obs_dim == 132，不符发 error 退出 |
 | §2.2 reset / config_override | `train.py: reset_payload / curriculum_override` | 训练 seed=-1 随机；评估用固定种子；课程学习压短时限 |
 | §2.4 action | `train.py: action_payload` | episode_id/step_id 严格回显所回应 obs |
 | §2.5 all_finish / bye | `train.py: send_all_finish / _wait_bye` | 三时机 converged/interrupted/error；等 bye 5 s 超时 |
@@ -158,7 +218,8 @@ r = 5.0 × (dist_{t-1} − dist_t) + 200·[goal_reached] − 200·[collision]
 - `logs/episodes.csv`：§6.6 每 episode 一行
 - `logs/eval.csv`：每次评估一行（训练 ep、成功率、成功局数）
 - `checkpoints/ckpt_{tag}.pt`：§7.3 格式（5 个 state_dict + optimizers + meta），
-  tag：`ep_{N}`（每 50 局）/ `best`（成功率新高）/ `final`（退出时）
+  tag：`ep_{N}`（每 `--save-interval` 局存一次，默认 10，**每次新名字、不覆盖**，
+  与评估解耦）/ `best`（评估成功率新高，覆盖）/ `final`（正常退出时）
 - 恢复训练：`python train.py --resume checkpoints/ckpt_best.pt`
   （从 meta 的 episode 之后继续，优化器状态一并恢复）
 
@@ -184,6 +245,11 @@ r = 5.0 × (dist_{t-1} − dist_t) + 200·[goal_reached] − 200·[collision]
 | run10 | v1.1 | 009 正式 | 异步 4 worker 纯 RL + resume run9@649(80%) | 同 run5 | 08-02 09:10 ~ 09:12 | 未收敛。仅 1 次评估（0.8@499），被无轮底盘改造打断 |
 | run11 | v1.1 | 009 正式 | **无轮运动学底盘**（圆柱机身，删除四轮/电机/physics，(v,w) 直接积分，碰撞仍雷达判定）+ 异步 4 worker 纯 RL + resume run10@499(80%) | 同 run5 | 08-02 09:18 ~ 09:24 | **收敛 ✓（warm-start 迁移验证）**。eval 0.8→**0.9×3 连续**（@549/@599/@649），654 局、18364 次更新后自动 all_finish。运动学底盘消除动力学噪声，策略平滑迁移即达 90% 门槛 |
 | run12 | v1.1 | 009 正式 | **新世界从零训练**：无轮运动学底盘 + 新采集专家数据（1000 局 90.5% 成功、0 碰撞，14.35 万条过渡，`scripted_expert --dump`）+ **buffer 容量 20 万→50 万**（防演示主导采样）+ 异步 4 worker | 同 run5 | 08-02 10:16 ~ 10:45 | **收敛 ✓（从零复现）**。eval：0%→50%@199→10%@249/299（SACfD 早期波动）→70%@349→**90/100/90/100/90**（@399~@649 连续 3 次 ≥90%@549/599/649）。654 局、88756 次更新自动 all_finish。最终权重 `checkpoints/final_best.pt`（= run12/ckpt_best） |
+| run13 (v5) | v1.1 | 009 正式 | **全 Python 异步 + 架构/映射修复**：pysim 12 worker + 独立评估实例 + 背压；LidarEncoder 全局池化→8 方向 bin（修复方向信息丢失，v4 不如 v2 的根因）；动作映射 v=(a0+1)/2·v_max（消除禁倒车死区）；expert_v4（600 局 94%、7.1 万条，死局修复后采集）预填 + 旧映射动作自动变换 | 固定难场景（5-8 障碍/2m 目标，无课程） | 08-02 22:23 ~ 22:45 | **收敛 ✓（22 分钟）**。eval：0%×3→10%@149→0%@199→70%@249→**90/90/100**（@299/349/399 连续 3 次 ≥90%）。422 局、69049 次更新自动停。最终权重 `checkpoints/ckpt_sim_v5_best.pt`（= run_pysim/ckpt_best） |
+| run14 (v6) | v1.1 | 009 正式（68 维栈回退） | 弃 v5（132 维 CNN 真机效果差），回退 v2 的 68 维 MLP + 旧动作映射；碰撞半径 0.28→**0.18**；**pysim 从 0** + expert_v4_68 预填 | 同 run13 | 08-02 深夜 | pysim 收敛 517 局，但 **Webots 验收仅 3/5（60%）**——pysim 无噪声/圆形近似障碍的 sim-sim 差距实锤（pysim 已修 Box/圆柱真实形状 + σ=0.01 噪声，专家复验 95%≈Webots 94%，但弃用 pysim 训练）。权重 `ckpt_sim_v6_best.pt` 废弃 |
+| run15 (v7) | v1.1 | 009 正式 | **回 Webots 异步**（run_webots_async.sh：4 采集 + 1 评估全 fast webots）从 0 + 预填 | 无课程 | 08-02 深夜 | 发现 train_async best 选择 bug：buffer<warmup 时首轮评估 100% 存成 ckpt_best（0 更新旧权重）后再超不过。已修：warmup 后才开始评估。真 v7（6905 更新）存 `ckpt_sim_v7_ep500.pt` |
+| run16 (v8) | v1.1 | 009 正式 | Webots 异步**从 0 权重**（用户指示，防思维定式）+ 预填；评估改**流动种子**（每轮 seed_base+=13，防背下固定 10 种子） | 无课程 | 08-02 23:1x ~ 23:4x | **收敛 ✓（618 局，upd 53012，流动种子 100×3）**。硬种子 30000-30014 验收 13/15（30002/30014 超时卡死）。权重 `ckpt_sim_v8_best.pt` |
+| run17 (v8b) | v1.1 | 009 正式 | resume v8 + **禁用自动收敛**（--converge-consecutive 999）续训 1100 局攻卡死角 | 无课程 | 08-02 23:54 ~ 08-03 00:12 | **达标 ✓**。eval 全程 90~100%（19 轮中 13 轮 100%）；终验 30 个全新种子（31000-31029）**28/30（93%）**；老硬种子 30000-30014 **15/15**（30002/30014 卡死消除）。最终权重 **`checkpoints/ckpt_sim_v8b_best.pt`**（= run_webots_v8b/ckpt_ep_1600，ep 1599/upd 77039） |
 
 > **环境四根因（run1-3 共 1188 局 0 成功的实锤结论，001 侧修复）**：
 > 1. 目标标记光柱对雷达可见 → 成功圈物理不可达（碰撞优先于 goal_reached），光柱抬出雷达平面；
