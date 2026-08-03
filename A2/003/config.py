@@ -58,6 +58,7 @@ MAX_EPISODES = 2_000            # 训练 episode 上限（收敛会提前 break�
 EVAL_INTERVAL = 50              # 每 N 个训练 episode 评估一次
 EVAL_EPISODES = 10              # 每次评估局数
 EVAL_SEED_BASE = 10_000         # 评估固定种子 = EVAL_SEED_BASE + i（i = 0..EVAL_EPISODES-1）
+SAVE_INTERVAL = 10              # 每 N 个训练 episode 存一次 ckpt_ep_N.pt（新名字不覆盖；与评估解耦）
 CONVERGE_CONSECUTIVE = 3        # 连续多少次评估达到收敛线
 CONVERGE_RATE = 0.9             # 成功率收敛线（≥90%）
 CKPT_INTERVAL = 50              # 每 N 个训练 episode 存一次 checkpoint

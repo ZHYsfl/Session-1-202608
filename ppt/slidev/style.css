@@ -1,0 +1,23 @@
+@import '@fontsource-variable/noto-sans-sc';
+
+.slidev-layout,
+.slidev-layout h1,
+.slidev-layout h2,
+.slidev-layout h3,
+.slidev-layout h4,
+.slidev-layout p,
+.slidev-layout div,
+.slidev-layout span,
+.slidev-layout td,
+.slidev-layout th,
+.slidev-layout li,
+.slidev-layout a,
+.slidev-layout table {
+  font-family: 'Noto Sans SC Variable', 'Noto Sans SC', ui-sans-serif, system-ui, sans-serif !important;
+}
+
+.slidev-layout code,
+.slidev-layout pre,
+.slidev-layout kbd {
+  font-family: ui-monospace, 'JetBrains Mono', Menlo, monospace, 'Noto Sans SC Variable', sans-serif !important;
+}

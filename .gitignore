@@ -3,3 +3,7 @@
 pi/
 
 *.pyc
+
+node_modules/
+
+.debs/

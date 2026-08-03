@@ -44,7 +44,7 @@ from buffer import ReplayBuffer
 from config import (ACT_DIM, CONVERGE_CONSECUTIVE, CONVERGE_RATE,
                     CUR_SHORT_EPISODES, CUR_SHORT_TIME, EVAL_EPISODES,
                     EVAL_INTERVAL, EVAL_SEED_BASE, MAX_EPISODES, OBS_DIM,
-                    PING_INTERVAL, PING_TIMEOUT, WS_URI)
+                    PING_INTERVAL, PING_TIMEOUT, SAVE_INTERVAL, WS_URI)
 from models import get_model_module, model_source
 from obs_pack import ObsPacker, scale_action
 from reward import compute_reward, done_mask, outcome_of
@@ -458,6 +458,13 @@ async def amain(args) -> int:
 
                     elog.log_episode(episode, steps, ret, outcome, success)
 
+                    # ---- 定期存盘：每 save_interval 局存一次 ckpt_ep_N.pt ----
+                    # （新名字、不覆盖；与评估解耦，Ctrl+C 最多丢 save_interval 局）
+                    if (episode + 1) % args.save_interval == 0:
+                        await save_ckpt(model_mod, args.save_dir,
+                                        f"ep_{episode + 1}", models, agent,
+                                        episode, hello["protocol_version"])
+
                     # ---- 周期性评估 + 存盘（§6.7）----
                     if (episode + 1) % args.eval_interval == 0:
                         rate, succ = await evaluate(ws, cfg, agent, args)
@@ -466,9 +473,10 @@ async def amain(args) -> int:
                         log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) ==",
                                  episode, 100 * rate, succ, args.eval_episodes)
 
-                        await save_ckpt(model_mod, args.save_dir,
-                                        f"ep_{episode + 1}", models, agent,
-                                        episode, hello["protocol_version"])
+                        if (episode + 1) % args.save_interval != 0:
+                            await save_ckpt(model_mod, args.save_dir,
+                                            f"ep_{episode + 1}", models, agent,
+                                            episode, hello["protocol_version"])
                         if rate > best_rate + 1e-9:
                             best_rate = rate
                             await save_ckpt(model_mod, args.save_dir, "best",
@@ -562,6 +570,9 @@ def parse_args(argv=None):
     ap.add_argument("--eval-interval", type=int, default=EVAL_INTERVAL)
     ap.add_argument("--eval-episodes", type=int, default=EVAL_EPISODES)
     ap.add_argument("--eval-seed-base", type=int, default=EVAL_SEED_BASE)
+    ap.add_argument("--save-interval", type=int, default=SAVE_INTERVAL,
+                    help="每隔多少局存一次 ckpt_ep_N.pt（每次新名字、不覆盖；"
+                         "真机微调建议 10）")
     ap.add_argument("--converge-consecutive", type=int,
                     default=CONVERGE_CONSECUTIVE)
     ap.add_argument("--converge-rate", type=float, default=CONVERGE_RATE)

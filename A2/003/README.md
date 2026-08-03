@@ -218,7 +218,8 @@ r = 5.0 × (dist_{t-1} − dist_t) + 200·[goal_reached] − 200·[collision]
 - `logs/episodes.csv`：§6.6 每 episode 一行
 - `logs/eval.csv`：每次评估一行（训练 ep、成功率、成功局数）
 - `checkpoints/ckpt_{tag}.pt`：§7.3 格式（5 个 state_dict + optimizers + meta），
-  tag：`ep_{N}`（每 50 局）/ `best`（成功率新高）/ `final`（退出时）
+  tag：`ep_{N}`（每 `--save-interval` 局存一次，默认 10，**每次新名字、不覆盖**，
+  与评估解耦）/ `best`（评估成功率新高，覆盖）/ `final`（正常退出时）
 - 恢复训练：`python train.py --resume checkpoints/ckpt_best.pt`
   （从 meta 的 episode 之后继续，优化器状态一并恢复）
 
