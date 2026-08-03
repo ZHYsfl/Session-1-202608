@@ -31,6 +31,7 @@ async def main() -> int:
     ap.add_argument("--pause-s", type=float, default=3.0,
                     help="每局之间停顿秒数，方便观看")
     args = ap.parse_args()
+    args.auto_human = False   # run_episode 需要该字段；仿真无 human 消息
 
     model_mod = get_model_module()
     models = model_mod.build_models("cpu")

@@ -51,7 +51,7 @@ COLLISION_DIST = 0.18
 MIN_LINEAR_VEL = 0.0
 LIDAR_OCCLUDED_BODY = (177.0, 277.0)
 ARENA_SIZE = 4.0
-OBS_DIM = 132
+OBS_DIM = 68              # 2026-08-02 晚回退：弃用 132 帧堆叠，回到 v2 的 68 维单帧
 ACT_DIM = 2
 
 START_GOAL_MIN_DIST = 2.0
@@ -63,6 +63,22 @@ MIN_ACTIVE = 5
 MAX_ACTIVE = 8
 N_OBSTACLES = 8
 OBSTACLE_RADII = [0.212, 0.25, 0.177, 0.247, 0.15, 0.20, 0.18, 0.12]
+# 障碍物真实形状（与 rl_arena.wbt 一致，2026-08-02 晚保真度修复）：
+# 0-3 号是 Box（半宽 hx, hy），4-7 号是圆柱。reset 摆放/死局检查仍按外接圆
+# （与 env_server 一致），但雷达射线检测必须按真实形状——外接圆在 Box 棱角
+# 方向比实物远 ~40%，纯圆训练的策略贴边时在 Webots/真机里会"以为能过实际卡住"。
+OBSTACLE_SHAPES = [
+    ("box", 0.15, 0.15),     # OBSTACLE_0: Box 0.3 x 0.3
+    ("box", 0.20, 0.15),     # OBSTACLE_1: Box 0.4 x 0.3
+    ("box", 0.125, 0.125),   # OBSTACLE_2: Box 0.25 x 0.25
+    ("box", 0.175, 0.175),   # OBSTACLE_3: Box 0.35 x 0.35
+    ("cyl", 0.15, 0.15),     # OBSTACLE_4: Cylinder r=0.15
+    ("cyl", 0.20, 0.20),     # OBSTACLE_5: Cylinder r=0.20
+    ("cyl", 0.18, 0.18),     # OBSTACLE_6: Cylinder r=0.18
+    ("cyl", 0.12, 0.12),     # OBSTACLE_7: Cylinder r=0.12
+]
+LIDAR_NOISE_STD = 0.01    # 雷达高斯噪声 σ（m），仅作用于有效命中；
+                          # pysim 原来无噪声是 sim-sim 差距来源之一
 WALL_INNER = ARENA_SIZE / 2 - 0.025  # 1.975
 
 CONFIG_KEYS = {
@@ -108,8 +124,9 @@ class PySim:
         self.seed_used = -1
         self.goal_xy = (0.0, 0.0)
         self.x, self.y, self.yaw = 0.0, 0.0, 0.0
-        self.placed = []           # [(x, y, r)] 本局激活障碍（圆）
+        self.placed = []           # [(x, y, r, shape, hx, hy, yaw)] 本局激活障碍
         self.rng = np.random.default_rng()
+        self.noise_rng = np.random.default_rng()   # 雷达噪声专用（不污染场景种子序列）
 
     # ================= 解析雷达 =================
     def _lidar(self):
@@ -128,17 +145,40 @@ class PySim:
                     np.abs(other_p + t * other_d) <= WALL_INNER)
                 best = np.where(hit, t, best)
 
-        # ---- 圆障碍（向量化解二次方程 |p + t·d − c|² = r² 的近正根）----
-        for cx, cy, r in self.placed:
-            ox, oy = self.x - cx, self.y - cy
-            b = ox * dx + oy * dy
-            c = ox * ox + oy * oy - r * r
-            disc = b * b - c
-            hit = disc > 0.0
-            t = -b - np.sqrt(np.maximum(disc, 0.0))
-            valid = hit & (t > 0.01) & (t < best)
-            best = np.where(valid, t, best)
+        # ---- 障碍（圆柱按圆、Box 按旋转矩形；逻辑与 env_server 物理体一致）----
+        for cx, cy, _r, shape, hx, hy, oyaw in self.placed:
+            if shape == "cyl":
+                ox, oy = self.x - cx, self.y - cy
+                b = ox * dx + oy * dy
+                c = ox * ox + oy * oy - hx * hx
+                disc = b * b - c
+                hit = disc > 0.0
+                t = -b - np.sqrt(np.maximum(disc, 0.0))
+                valid = hit & (t > 0.01) & (t < best)
+                best = np.where(valid, t, best)
+            else:
+                # 旋转矩形：射线变换到 Box 局部系（绕 -oyaw 旋转），slab 法
+                ca, sa = math.cos(oyaw), math.sin(oyaw)
+                olx = ca * (self.x - cx) + sa * (self.y - cy)
+                oly = -sa * (self.x - cx) + ca * (self.y - cy)
+                dlx = ca * dx + sa * dy
+                dly = -sa * dx + ca * dy
+                with np.errstate(divide="ignore", invalid="ignore"):
+                    tx1 = np.where(np.abs(dlx) > 1e-9, (-hx - olx) / dlx, -np.inf)
+                    tx2 = np.where(np.abs(dlx) > 1e-9, (hx - olx) / dlx, np.inf)
+                    ty1 = np.where(np.abs(dly) > 1e-9, (-hy - oly) / dly, -np.inf)
+                    ty2 = np.where(np.abs(dly) > 1e-9, (hy - oly) / dly, np.inf)
+                t_enter = np.maximum(np.minimum(tx1, tx2), np.minimum(ty1, ty2))
+                t_exit = np.minimum(np.maximum(tx1, tx2), np.maximum(ty1, ty2))
+                valid = (t_enter <= t_exit) & (t_enter > 0.01) & (t_enter < best)
+                best = np.where(valid, t_enter, best)
 
+        # 高斯噪声（仅有效命中；模拟 Webots 雷达测量噪声），再中位数滤波
+        hit_mask = best < LIDAR_MAX_RANGE
+        best = np.where(
+            hit_mask,
+            best + self.noise_rng.normal(0.0, LIDAR_NOISE_STD, LIDAR_COUNT),
+            best)
         lid = _median3(np.clip(best, 0.0, LIDAR_MAX_RANGE))
         lid[_OCCL_I0:_OCCL_I1] = LIDAR_MAX_RANGE   # 车壳遮挡扇区
         return lid
@@ -166,6 +206,7 @@ class PySim:
             placed = []
             for rank, obs_i in enumerate(order):
                 r = OBSTACLE_RADII[obs_i]
+                shape, hx, hy = OBSTACLE_SHAPES[obs_i]
                 if rank < n_active:
                     pos = None
                     for _ in range(100):
@@ -176,12 +217,14 @@ class PySim:
                         if math.hypot(ox - gx, oy - gy) < r + SAMPLE_CLEARANCE:
                             continue
                         if any(math.hypot(ox - px, oy - py) < r + pr + OBSTACLE_GAP
-                               for px, py, pr in placed):
+                               for px, py, pr, *_ in placed):
                             continue
                         pos = (float(ox), float(oy))
                         break
                     if pos is not None:
-                        placed.append((pos[0], pos[1], r))
+                        # env_server 对每个成功摆放的障碍抽一次随机朝向（rng 序列对齐）
+                        oyaw = float(self.rng.uniform(0, 2 * math.pi))
+                        placed.append((pos[0], pos[1], r, shape, hx, hy, oyaw))
 
             if self._is_reachable(sx, sy, gx, gy, placed):
                 break
@@ -202,7 +245,7 @@ class PySim:
         half = ARENA_SIZE / 2.0
         n = int(ARENA_SIZE / res) + 1
         occ = np.zeros((n, n), dtype=bool)
-        for px, py, r in placed:
+        for px, py, r, *_ in placed:
             rr = (r + inflate) ** 2
             i0 = max(0, int((px - r - inflate + half) / res))
             i1 = min(n - 1, int((px + r + inflate + half) / res))

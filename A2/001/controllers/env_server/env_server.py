@@ -57,7 +57,7 @@ MIN_LINEAR_VEL = 0.0        # m/s，真机对齐：后方是雷达盲区（车�
 # max_range。真机实测原始角度 115°~215° + offset -61.88° ≈ 车体 177°~277°。
 LIDAR_OCCLUDED_BODY = (177.0, 277.0)
 ARENA_SIZE = 4.0            # m
-OBS_DIM = 132             # client 侧 2 帧雷达堆叠 + goal + vel（2026-08-02 升级）
+OBS_DIM = 68              # client 侧单帧打包（2026-08-02 晚回退：弃用 132 帧堆叠）
 ACT_DIM = 2
 
 # 底盘几何（与 .wbt 一致；真机对齐时改这里）
@@ -82,7 +82,7 @@ WALL_INNER = ARENA_SIZE / 2 - 0.025  # 1.975
 CONFIG_KEYS = {
     "lidar_count": LIDAR_COUNT,
     "lidar_max_range": LIDAR_MAX_RANGE,
-    "obs_dim": OBS_DIM,          # 132：client 侧 2 帧雷达堆叠 + goal + vel
+    "obs_dim": OBS_DIM,          # 68：client 侧单帧打包 + goal + vel
     "act_dim": ACT_DIM,
     "control_dt": CONTROL_DT,
     "max_episode_time": MAX_EPISODE_TIME,

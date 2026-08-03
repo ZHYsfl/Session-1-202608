@@ -37,7 +37,6 @@ from config import (ACT_DIM, CONVERGE_CONSECUTIVE, CONVERGE_RATE,
                     EVAL_EPISODES, EVAL_INTERVAL, EVAL_SEED_BASE,
                     MAX_EPISODES, OBS_DIM, PING_INTERVAL, PING_TIMEOUT)
 from models import get_model_module
-from obs_pack import expert_action_v1_to_v2
 from sac import SACAgent
 
 log = logging.getLogger("train_async")
@@ -182,6 +181,13 @@ async def eval_scheduler(args, agent: LockedAgent, models, model_mod,
         log.info("评估实例 hello OK: %s v%s", hello.get("env_name"),
                  protocol_version)
 
+        # 等 learner 真正开更（buffer 到 warmup）再开始评估/存 best（08-02 晚
+        # bug 修复）：v7 续训时首轮评估在 buffer=1143<warmup 时发生，0 次更新
+        # 的旧权重考 100% 被存成 best，之后 100/90 都超不过 100+ε——best 永远
+        # 是没训过的权重，演示/真机拿错模型。
+        while counters.updates_done == 0 and not stop_event.is_set():
+            await asyncio.sleep(1.0)
+
         best_rate = -1.0
         converge_streak = 0
         start = args.resume_episode + 1
@@ -195,8 +201,14 @@ async def eval_scheduler(args, agent: LockedAgent, models, model_mod,
             rate, succ = await T.evaluate(ws, cfg, agent, args)
             counters.total_resets += args.eval_episodes
             evlog.log_eval(target - 1, rate, succ, args.eval_episodes)
-            log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) ==",
-                     target - 1, 100 * rate, succ, args.eval_episodes)
+            log.info("== 评估 @ ep %d：成功率 %.2f%% (%d/%d) seeds=%d..%d ==",
+                     target - 1, 100 * rate, succ, args.eval_episodes,
+                     args.eval_seed_base,
+                     args.eval_seed_base + args.eval_episodes - 1)
+            # 流动评估种子（08-02 晚）：固定 10 个种子会被 checkpoint 选择
+            # "背下来"——v6 在固定种子上 100%、换新种子只有 70-80%。
+            # 每轮评估后平移种子基，收敛判定始终面对未见过的场景。
+            args.eval_seed_base += 13
 
             await T.save_ckpt(model_mod, args.save_dir, f"ep_{target}", models,
                               agent, target - 1, protocol_version)
@@ -250,8 +262,6 @@ async def amain(args) -> int:
         n = len(rew_npz)
         assert obs_npz.shape == (n, OBS_DIM), \
             f"preload obs 形状 {obs_npz.shape} 与 OBS_DIM={OBS_DIM} 不符"
-        # 旧动作映射专家数据 → 新映射（obs_pack §4，与 train.py 一致）
-        act_npz = expert_action_v1_to_v2(act_npz)
         for i in range(n):
             buffer.push(obs_npz[i], act_npz[i], float(rew_npz[i]),
                         nobs_npz[i], float(done_npz[i]))

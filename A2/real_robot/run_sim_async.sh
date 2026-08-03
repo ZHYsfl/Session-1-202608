@@ -33,15 +33,15 @@ sleep 3
 
 COMMON="--workers $WORKERS --base-port $BASE --eval-uri ws://127.0.0.1:$EVAL_PORT \
     --episodes $EPISODES --no-curriculum \
-    --log-dir logs/run_pysim --save-dir checkpoints/run_pysim"
+    --log-dir logs/run_pysim_v6 --save-dir checkpoints/run_pysim_v6"
 if [ -n "$RESUME" ]; then
     echo "[async] resume from $RESUME"
     # shellcheck disable=SC2086
     uv run python train_async.py $COMMON --resume "$RESUME"
 else
-    echo "[async] from scratch + preload data/expert_v4.npz"
+    echo "[async] from scratch + preload data/expert_v4_68.npz"
     # shellcheck disable=SC2086
-    uv run python train_async.py $COMMON --preload data/expert_v4.npz
+    uv run python train_async.py $COMMON --preload data/expert_v4_68.npz
 fi
 RC=$?
 

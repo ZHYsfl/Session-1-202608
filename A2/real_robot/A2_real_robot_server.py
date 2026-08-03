@@ -189,6 +189,9 @@ class RealRobotServer(Node):
         self._last_seed = -1
         self._step_in_progress = False
         self._step_task: Optional[asyncio.Task] = None
+        # 碰撞确认计数：min_lidar 需连续 COLLISION_CONFIRM_STEPS 步低于阈值
+        # 才判碰撞——真机雷达 <0.2m 有 1-2cm 抖动，单步误触发会喂假 -200
+        self._collision_streak = 0
 
         # server 退出信号
         self._stop_event = asyncio.Event()
@@ -284,6 +287,9 @@ class RealRobotServer(Node):
             out[i] = float(np.median([a, b, c]))
         return out
 
+    # 碰撞确认步数（控制周期 0.1s，3 步 = 0.3s 持续低于阈值才判碰撞）
+    COLLISION_CONFIRM_STEPS = 3
+
     # ---------------- 观测计算 ----------------
     def _get_current_pose(self) -> Optional[Pose2D]:
         with self._lock:
@@ -337,6 +343,10 @@ class RealRobotServer(Node):
 
         min_lidar = min(lidar)
         if min_lidar < self.cfg["collision_dist"]:
+            self._collision_streak += 1
+        else:
+            self._collision_streak = 0
+        if self._collision_streak >= self.COLLISION_CONFIRM_STEPS:
             flags["collision"] = True
             done = True
         elif dist <= self.cfg["goal_tolerance"]:
@@ -516,6 +526,7 @@ class RealRobotServer(Node):
         self.episode_id += 1
         self.step_id = 0
         self.episode_t = 0.0
+        self._collision_streak = 0
         self.state = "RUNNING"
         log.info("episode %d 开始: start=(%.3f,%.3f) goal=(%.3f,%.3f)",
                  self.episode_id, self.start_abs.x, self.start_abs.y,
